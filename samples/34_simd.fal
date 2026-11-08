@@ -1,0 +1,67 @@
+fn fill(xs: f32[:], seed: i32) {
+    for i in xs.len { xs[i] = ((i as i32 * 31 + seed) % 251 - 125) / 8.0; }
+}
+
+fn fill_u8(xs: u8[:], seed: i32) {
+    for i in xs.len { xs[i] = ((i as i32 * 31 + seed) % 251) as! u8; }
+}
+
+fn sum_ref(xs: u8[:]) -> u32 {
+    var h: u32 = 0;
+    for x in xs { h += x as u32 * 31 + 7; }
+    return h;
+}
+
+simd fn sum_simd(xs: u8[:]) -> u32 {
+    var h: u32 = 0;
+    for x in xs { h += x as u32 * 31 + 7; }
+    return h;
+}
+
+fn dot_ref(xs: f32[:], ys: f32[:]) -> f32 {
+    var s: f32 = 0;
+    for i in xs.len { s += xs[i] * ys[i]; }
+    return s;
+}
+
+simd fn dot_simd(xs: f32[:], ys: f32[:]) -> f32 {
+    var s: f32 = 0;
+    for i in xs.len { s += xs[i] * ys[i]; }
+    return s;
+}
+
+fn minmax_ref(xs: f32[:]) -> f32 {
+    var m: f32 = xs[0];
+    for x in xs { if x < m { m = x; } }
+    return m;
+}
+
+simd fn minmax_simd(xs: f32[:]) -> f32 {
+    var m: f32 = xs[0];
+    for x in xs { if x < m { m = x; } }
+    return m;
+}
+
+fn main() {
+    var bytes: u8[>..] = [];
+    bytes.resize(70000, 0);
+    fill_u8(bytes, 3);
+    let a = sum_ref(bytes);
+    let b = sum_simd(bytes);
+    print("u8 sum: ", a, " match: ", a == b);
+
+    var xs: f32[>..] = [];
+    var ys: f32[>..] = [];
+    xs.resize(50000, 0);
+    ys.resize(50000, 0);
+    fill(xs, 1);
+    fill(ys, 7);
+    let d1 = dot_ref(xs, ys);
+    let d2 = dot_simd(xs, ys);
+    print("dot: ", d1, " match: ", d1 == d2);
+
+    let m1 = minmax_ref(xs);
+    let m2 = minmax_simd(xs);
+    print("min: ", m1, " match: ", m1 == m2);
+    print("sum bytes: ", sum_simd("faloya"));
+}

@@ -1,0 +1,10 @@
+extern fn cube_root(x: f64) -> f64 = "cbrt";
+extern fn hypot(x: f64, y: f64) -> f64;
+extern fn round_half_up(x: f64) -> f64 = "round";
+
+fn main() {
+    print("cbrt(8) = ", cube_root(8.0));
+    print("hypot(3, 4) = ", hypot(3.0, 4.0));
+    print("round(2.5) = ", round_half_up(2.5));
+    print("cbrt(27) = ", cube_root(27.0));
+}

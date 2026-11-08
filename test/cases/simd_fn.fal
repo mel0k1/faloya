@@ -1,0 +1,27 @@
+fn sum_ref(xs: u8[:]) -> u32 {
+    var h: u32 = 0;
+    for x in xs { h += x as u32 * 31 + 7; }
+    return h;
+}
+
+simd fn sum_simd(xs: u8[:]) -> u32 {
+    var h: u32 = 0;
+    for x in xs { h += x as u32 * 31 + 7; }
+    return h;
+}
+
+simd fn dot(xs: f32[:], ys: f32[:]) -> f32 {
+    var s: f32 = 0;
+    for i in xs.len { s += xs[i] * ys[i]; }
+    return s;
+}
+
+fn main() {
+    let a = sum_ref("faloya simd");
+    let b = sum_simd("faloya simd");
+    print("match: ${a == b} sum: ${b}");
+    var xs: f32[>..] = [];
+    var ys: f32[>..] = [];
+    for i in 1000 { xs.push(i * 0.25); ys.push(100.0 - i * 0.125); }
+    print("dot: ${dot(xs, ys)}");
+}

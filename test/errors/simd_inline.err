@@ -1,0 +1,1 @@
+simd fn cannot be inline: its callers would run the baseline only

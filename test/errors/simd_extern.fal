@@ -1,0 +1,3 @@
+extern simd fn cube_root(x: f64) -> f64 = "cbrt";
+
+fn main() { print(cube_root(8.0)); }

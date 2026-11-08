@@ -1,0 +1,1 @@
+extern fn cannot be simd: it has no body to compile
