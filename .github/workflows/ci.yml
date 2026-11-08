@@ -25,3 +25,17 @@ jobs:
         run: python3 test/run.py --exe build/faloya
       - name: samples
         run: python3 samples/run_samples.py --exe build/faloya -j 4
+
+  vscode:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: extension
+        run: |
+          node --check vscode/src/extension.js
+          for f in vscode/package.json vscode/language-configuration.json vscode/snippets/*.json vscode/syntaxes/*.json; do
+            node -e "const o = JSON.parse(require('fs').readFileSync('$f')); if ('$f'.includes('tmLanguage')) { if (!o.scopeName || !o.patterns) process.exit(1); }"
+          done

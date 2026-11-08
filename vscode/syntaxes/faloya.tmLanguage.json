@@ -1,0 +1,67 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Faloya",
+  "scopeName": "source.faloya",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "match": "\\broot\\b(?=\\s+struct\\b)", "name": "storage.modifier.faloya" },
+    { "include": "#declarations" },
+    { "match": "\\b(?:bool|varint|[iu](?:8|16|32|64)|f(?:32|64))\\b", "name": "storage.type.faloya" },
+    { "match": "\\b(?:true|false|null)\\b", "name": "constant.language.faloya" },
+    { "match": "\\bself\\b", "name": "variable.language.faloya" },
+    { "match": "\\b(?:if|else|while|for|in|loop|block|guard|defer|match|return|break|continue)\\b", "name": "keyword.control.faloya" },
+    { "match": "\\b(?:import|namespace|as)\\b", "name": "keyword.other.faloya" },
+    { "match": "\\b(?:struct|enum|type|fn|thread_fn|let|var|const)\\b", "name": "storage.type.faloya" },
+    { "match": "\\b(?:export|extern|simd|recursive|pad|reusable)\\b", "name": "storage.modifier.faloya" },
+    { "include": "#numbers" },
+    { "match": "\\b(?:print|str|format|assert|abort|exit|hardware_threads|thread_spawn|thread_spawn_contained|thread_wait|qput|qget|qpoll|qlimit|default|copy|move_from|to_bytes|bytes_of|from_bytes|embed_shader|embed_file|index_of|range_index|check_length|push|append|pop|pop_n|resize|clear|alloc_index|alloc_ref|free|alloc_slice|realloc_slice|free_slice)\\b(?=\\s*[<(])", "name": "support.function.faloya" },
+    { "match": "(?<=\\.)\\b(?:len|cap)\\b", "name": "support.variable.property.faloya" },
+    { "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*::)", "name": "entity.name.namespace.faloya" },
+    { "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*\\()", "name": "entity.name.function.faloya" },
+    { "match": "\\b[A-Z][A-Z0-9_]*\\b", "name": "constant.other.faloya" },
+    { "match": "\\b[A-Z][A-Za-z0-9_]*\\b", "name": "entity.name.type.faloya" },
+    { "match": "\\|>|\\.==|\\.!=|\\.=|\\.\\.|::|->|=>|<<=?|>>=?|[+*/%=&|^!<>-]=?|[?~]", "name": "keyword.operator.faloya" },
+    { "match": "[{}\\[\\]()]", "name": "punctuation.section.faloya" },
+    { "match": "[.,;:]", "name": "punctuation.separator.faloya" }
+  ],
+  "repository": {
+    "comments": { "patterns": [
+      { "name": "comment.line.double-slash.faloya", "begin": "//", "end": "$" },
+      { "include": "#block-comment" }
+    ] },
+    "block-comment": { "name": "comment.block.faloya", "begin": "/\\*", "end": "\\*/", "patterns": [{ "include": "#block-comment" }] },
+    "strings": { "patterns": [
+      { "name": "string.quoted.triple.faloya", "begin": "\"\"\"", "end": "\"\"\"", "patterns": [{ "include": "#escapes" }] },
+      { "name": "string.quoted.double.faloya", "begin": "\"", "end": "\"|$",
+        "patterns": [
+          { "include": "#escapes" },
+          { "include": "#interpolation" }
+        ] },
+      { "name": "string.quoted.single.faloya", "begin": "'", "end": "'|$", "patterns": [{ "include": "#escapes" }] }
+    ] },
+    "interpolation": {
+      "name": "meta.interpolation.faloya",
+      "begin": "\\$\\{",
+      "beginCaptures": { "0": { "name": "punctuation.definition.interpolation.begin.faloya" } },
+      "end": "\\}",
+      "endCaptures": { "0": { "name": "punctuation.definition.interpolation.end.faloya" } },
+      "patterns": [{ "include": "#escapes" }, { "include": "source.faloya" }]
+    },
+    "escapes": { "patterns": [
+      { "match": "\\\\(?:[ntr0$\\\\\"']|x[0-9a-fA-F]{2})", "name": "constant.character.escape.faloya" },
+      { "match": "\\\\.", "name": "invalid.illegal.escape.faloya" }
+    ] },
+    "declarations": { "patterns": [
+      { "match": "\\b(fn|thread_fn)\\s+((?:::)?(?:[A-Za-z_][A-Za-z0-9_]*::)*[A-Za-z_][A-Za-z0-9_]*)", "captures": { "1": { "name": "storage.type.function.faloya" }, "2": { "name": "entity.name.function.faloya" } } },
+      { "match": "\\b(struct|enum|type)\\s+((?:::)?(?:[A-Za-z_][A-Za-z0-9_]*::)*[A-Za-z_][A-Za-z0-9_]*)", "captures": { "1": { "name": "storage.type.faloya" }, "2": { "name": "entity.name.type.faloya" } } },
+      { "match": "\\b(namespace)\\s+([A-Za-z_][A-Za-z0-9_]*)", "captures": { "1": { "name": "keyword.other.faloya" }, "2": { "name": "entity.name.namespace.faloya" } } }
+    ] },
+    "numbers": { "patterns": [
+      { "match": "\\b0[xX][0-9a-fA-F]+(?:\\.[0-9a-fA-F]+)?[pP][+-]?[0-9]+\\b", "name": "constant.numeric.float.hex.faloya" },
+      { "match": "\\b0[xX][0-9a-fA-F]+\\b", "name": "constant.numeric.integer.hex.faloya" },
+      { "match": "\\b[0-9]+(?:\\.[0-9]+(?:[eE][+-]?[0-9]+)?|[eE][+-]?[0-9]+)\\b", "name": "constant.numeric.float.faloya" },
+      { "match": "\\b[0-9]+\\b", "name": "constant.numeric.integer.faloya" }
+    ] }
+  }
+}
