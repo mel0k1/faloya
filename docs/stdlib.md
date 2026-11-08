@@ -13,6 +13,7 @@
 - [os](#os)
 - [ffi](#ffi)
 - [binary](#binary)
+- [ast](#ast)
 - [base64](#base64)
 - [csv](#csv)
 - [json](#json)
@@ -24,9 +25,9 @@
 
 </details>
 
-The standard library has eighteen modules under `stdlib/`: `std`,
+The standard library has nineteen modules under `stdlib/`: `std`,
 `dictionary`, `slot_pool`, `slice_pool`, `vec`, `math`, `os`, `ffi`, `binary`,
-`base64`, `csv`, `json`, `regex`, `audio`, `gfx`, `physics`, `ui`, and `exception`.
+`ast`, `base64`, `csv`, `json`, `regex`, `audio`, `gfx`, `physics`, `ui`, and `exception`.
 Import each module by name,
 for example `import std;`. The compiler locates the library in its source
 tree; use `--stdlib <dir>` or `GOOSE_STDLIB` to select another location.
@@ -1324,6 +1325,70 @@ var r = binary::reader(out);
 binary::skip(r, 2);                          // past the length field
 let payload, ok = binary::read_bytes(r, binary::left(r));
 ```
+
+## ast
+
+A lexer and a recursive-descent parser for a substantial subset of the
+language, written in Goose itself: the first step of the self-hosting plan in
+[ROADMAP.md](../ROADMAP.md). `import ast;` puts the API in namespace `ast`.
+Parsing allocates nothing behind the caller's back: tokens and nodes live in
+the parser's two grow-only arrays, and every node carries its source line, so
+tooling built on top of it can report positions. On the repository's own
+sources it parses every sample and every standard-library module.
+
+### Parsing
+
+```goose
+var p: ast::Parser = ast::Parser { .. };
+let root = ast::parse(src, p);      // src: const u8[:]
+if !p.ok {
+    var msg: u8[>..] = [];
+    ast::error_line(p, msg);        // ast: line 12: expected ';' near '}'
+    print(msg);
+}
+```
+
+`parse` lexes `src` into `p.toks`, then parses a whole file: imports and
+namespaces, structs and enums (generic and `root` forms included), globals
+and `fn` definitions, with `export`, `extern`, `inline`, `checkfree`, `simd`,
+`recursive` and `thread_fn` qualifiers. On success `p.ok` is true and `root`
+(index 0) holds the file; on the first error it is false, parsing stops, and
+`error_line` formats the line, the expectation and the offending token.
+
+### What the trial covers
+
+Expressions with the full operator precedence, from `|>` at the bottom up
+through `*`, `/` and `%`, unary `-`, `!`, `~`, `&`, postfix `as` and `as!`
+casts, calls with generic arguments and trailing function blocks, struct and
+array literals (including `[value; count]` fills and `..` spreads), indexing
+with ranges and `^` from-the-end indexing. Statements cover `let` and `var`
+(single names, lists, qualified names, forms without an initializer),
+assignments in every compound form, multi-target assignments, `if`/`else if`
+chains, `while`, `loop`, `for` (with several loop variables and `&`
+bindings), `guard` with and without `else`, `return` with several values and
+`return ... from`, `break`, `continue`, `defer`, nested `fn` and `thread_fn`
+definitions, and `match` as a statement and as an expression, with variant,
+binding, literal and range patterns.
+
+The trial keeps whole interpolating strings as one token rather than a tree,
+and does not cover `const for`/`const if` expansion or function values
+(`fn(...) { ... }` in an expression).
+
+### Nodes and the dump
+
+```goose
+struct Node { k: Nk, op: Op, line: i32, val: i64, fval: f64,
+              text: const u8[:], first: i64, next: i64, last: i64 }
+ast::dump(p, root, 0, out);     // an indented tree, appended to out
+```
+
+Children form a left-child/next-sibling chain: `first` names a node's first
+child, `next` its next sibling, and `last` makes appends constant-time. The
+payload depends on the kind: `text` carries names and raw source spans,
+`val` integer and character values plus flags (`let` vs `var`, `.=`,
+qualifiers, index forms), `fval` float values. Types are captured as raw
+source spans (`Nk.Raw`), which keeps this parser free to evolve while its
+trees are compared against what the C++ compiler builds.
 
 ## base64
 
