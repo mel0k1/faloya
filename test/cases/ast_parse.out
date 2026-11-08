@@ -1,0 +1,51 @@
+file
+  fn main
+    block
+      let x
+        name x
+        bin +
+          int 1
+          bin *
+            int 2
+            int 3
+      expr
+        call
+          name print
+          str "x=${x}"
+
+nodes: 14 tokens: 21
+----
+file
+  fn add
+    param a
+      raw i64
+    param b
+      raw i64
+    raw i64
+    block
+      return
+        bin +
+          name a
+          name b
+
+nodes: 12 tokens: 21
+----
+file
+  fn f
+    param xs
+      raw i32[:]
+    block
+      for
+        name x
+        name xs
+        block
+          if
+            bin >
+              name x
+              int 0
+            block
+              continue
+
+nodes: 15 tokens: 27
+----
+ast: line 1: expected a name near '{'

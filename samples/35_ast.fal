@@ -1,0 +1,26 @@
+import ast;
+
+fn parse_and_report(src: const u8[:], label: const u8[:]) {
+    var p: ast::Parser = ast::Parser { .. };
+    let root = ast::parse(src, p);
+    if !p.ok {
+        var msg: u8[>..] = [];
+        format(msg, label, ": ");
+        ast::error_line(p, msg);
+        print(msg);
+        return;
+    }
+    print(label, ": ", p.toks.len, " tokens, ", p.nodes.len, " nodes");
+}
+
+fn main() {
+    let demo = embed_file("ast_demo.txt");
+    parse_and_report(demo, "demo");
+    var p: ast::Parser = ast::Parser { .. };
+    ast::parse(demo, p);
+    var out: u8[>..] = [];
+    ast::dump(p, 0, 0, out);
+    print(out);
+
+    parse_and_report("fn f() { let x = 1 + ; }", "error");
+}

@@ -1,0 +1,26 @@
+import ast;
+
+fn show(src: const u8[:]) {
+    var p: ast::Parser = ast::Parser { .. };
+    let root = ast::parse(src, p);
+    if !p.ok {
+        var msg: u8[>..] = [];
+        ast::error_line(p, msg);
+        print(msg);
+        return;
+    }
+    var out: u8[>..] = [];
+    ast::dump(p, root, 0, out);
+    print(out);
+    print("nodes: ${p.nodes.len} tokens: ${p.toks.len}");
+}
+
+fn main() {
+    show("fn main() { let x = 1 + 2 * 3; print(\"x=\${x}\"); }");
+    print("----");
+    show("fn add(a: i64, b: i64) -> i64 { return a + b; }");
+    print("----");
+    show("fn f(xs: i32[:]) { for x in xs { if x > 0 { continue; } } }");
+    print("----");
+    show("fn broken( { let = ;");
+}

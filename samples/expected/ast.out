@@ -1,0 +1,111 @@
+demo: 210 tokens, 108 nodes
+file
+  struct Item
+    raw name: u8[..12]
+    raw price: i32
+    raw next: Item&<u32>?
+  fn total
+    param items
+      raw Item[>..]&
+    raw i32
+    block
+      let var sum
+        name sum
+        int 0
+      for
+        name it
+        name items
+        block
+          assign +=
+            name sum
+            field price
+              name it
+      return
+        name sum
+  fn find
+    param pool
+      raw Item[>..]&
+    param name
+      raw u8[:]
+    raw Item&?
+    block
+      for
+        name it
+        name pool
+        block
+          if
+            bin ==
+              call
+                name compare
+                index
+                  field name
+                    name it
+                  range ..
+                name name
+              int 0
+            block
+              return
+                name it
+      return
+        name null
+  fn main
+    block
+      let var shop
+        name shop
+          raw Item[>..]
+        arr
+      expr
+        call
+          field push
+            name shop
+          lit
+            name Item
+            fld name
+              str "tea"
+            fld price
+              int 250
+      let kind
+        name kind
+        if
+          bin >
+            field len
+              name shop
+            int 0
+          block
+            expr
+              str "open"
+          block
+            expr
+              str "empty"
+      match
+        field len
+          name shop
+        arm
+          int 0
+          block
+            expr
+              call
+                name print
+                str "nothing yet"
+        arm
+          range ..
+            int 1
+            int 9
+          call
+            name print
+            str "small "
+            name kind
+        arm
+          name _
+          call
+            name print
+            str "big shop"
+      expr
+        call
+          name print
+          str "total: "
+          call
+            name total
+            name shop
+
+error: ast: line 1: expected an expression near ';'

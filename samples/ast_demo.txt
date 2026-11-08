@@ -1,0 +1,24 @@
+struct Item { name: u8[..12], price: i32, next: Item&<u32>? }
+
+fn total(items: Item[>..]&) -> i32 {
+    var sum = 0;
+    for it in items { sum += it.price; }
+    return sum;
+}
+
+fn find(pool: Item[>..]&, name: u8[:]) -> Item&? {
+    for &it in pool { if compare(it.name[..], name) == 0 { return it; } }
+    return null;
+}
+
+fn main() {
+    var shop: Item[>..] = [];
+    shop.push(Item { name: "tea", price: 250 });
+    let kind = if shop.len > 0 { "open" } else { "empty" };
+    match shop.len {
+        0 => { print("nothing yet"); },
+        1..9 => print("small ", kind),
+        _ => print("big shop"),
+    }
+    print("total: ", total(shop));
+}
