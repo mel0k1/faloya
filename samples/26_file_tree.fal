@@ -1,0 +1,151 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+import slice_pool;
+import slot_pool;
+
+
+
+
+type Link = Node&<u32 in nodes.items>?;
+
+struct Node {
+    name:    u8[..15],  
+    entries: Link[:],   
+}
+
+var nodes = slot_pool<Node> {};
+var runs = slice_pool<Link> {};
+
+
+fn make(name: u8[:]) -> Node& {
+    return nodes.alloc_ref(Node { name: name, entries: runs.alloc_slice(0) });
+}
+
+let root .= make("/");
+
+
+
+
+
+fn link(dir: Node&, n: Node&) {
+    let k = dir.entries.len;
+    dir.entries = runs.realloc_slice(dir.entries, k + 1);
+    dir.entries[k] .= n;
+}
+
+fn add(dir: Node&, name: u8[:]) -> Node& {
+    let n .= make(name);
+    link(dir, n);
+    return n;
+}
+
+
+
+fn unlink(dir: Node&, i: i64) -> Node& {
+    let n = dir.entries[i];
+    assert(n);
+    for j in i..dir.entries.len - 1 { dir.entries[j] .= dir.entries[j + 1]; }
+    dir.entries = runs.realloc_slice(dir.entries, dir.entries.len - 1);
+    return n;
+}
+
+
+
+fn position(dir: Node&, child: Node&) -> i64 {
+    for i in dir.entries.len {
+        let e = dir.entries[i];
+        assert(e);
+        if e .== child { return i; }
+    }
+    abort("not an entry");
+}
+
+
+
+
+recursive fn release(n: Node&) {
+    for e in n.entries {
+        assert(e);
+        release(e);
+    }
+    runs.free_slice(n.entries);
+    nodes.free_ref(n);
+}
+
+
+fn remove(dir: Node&, child: Node&) {
+    unlink(dir, position(dir, child));
+    release(child);
+}
+
+
+fn move(dir: Node&, child: Node&, to: Node&) {
+    link(to, unlink(dir, position(dir, child)));
+}
+
+
+recursive fn show(n: Node&, depth: i64, out: u8[>..]&) -> i64 {
+    for i in depth { format(out, "  "); }
+    format(out, n.name, "\n");
+    var count = 1;
+    for e in n.entries {
+        assert(e);
+        count += show(e, depth + 1, out);
+    }
+    return count;
+}
+
+
+
+fn listing(what: u8[:]) {
+    var out: u8[>..] = [];
+    let live = show(root, 0, out);
+    print("-- ", what, ": ", live, " nodes in ", nodes.items.len, " slots, ", live - 1, " links in ",
+          runs.items.len, " cells");
+    print(out[..^1]);
+}
+
+fn main() {
+    let home .= add(root, "home/");
+    let ann .= add(home, "ann/");
+    add(ann, "notes.txt");
+    let todo .= add(ann, "todo.txt");
+    let bob .= add(home, "bob/");
+    add(bob, "game.sav");
+    let etc .= add(root, "etc/");
+    add(etc, "hosts");
+    listing("built");
+
+    
+    remove(home, bob);
+    listing("rm -r /home/bob");
+
+    
+    let carl .= add(home, "carl/");
+    add(carl, "a.txt");
+    listing("mkdir /home/carl, touch a.txt");
+
+    
+    
+    
+    move(ann, todo, etc);
+    listing("mv /home/ann/todo.txt /etc");
+
+    
+    
+    for i in 3 { add(etc, str("log", i)); }
+    add(ann, "b.txt");
+    add(carl, "c.txt");
+    listing("more files");
+}

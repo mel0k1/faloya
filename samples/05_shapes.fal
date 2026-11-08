@@ -1,0 +1,146 @@
+
+
+
+
+
+
+
+
+
+
+
+
+import math;
+
+enum Shape {
+    Circle { r: f64 },
+    Rect { w: f64, h: f64 },
+    Tri { a: f64, b: f64, c: f64 },
+    Dot,
+}
+
+
+
+
+
+fn area(s: Shape.Circle) -> f64 { PI * s.r * s.r }
+fn area(s: Shape.Rect) -> f64 { s.w * s.h }
+fn area(s: Shape.Tri) -> f64 {
+    let p = (s.a + s.b + s.c) / 2.0;     
+    sqrt(p * (p - s.a) * (p - s.b) * (p - s.c))
+}
+fn area(s: Shape.Dot) -> f64 { 0.0 }
+
+fn sides(s: Shape.Circle) -> i64 { 0 }
+fn sides(s: Shape.Rect) -> i64 { 4 }
+fn sides(s: Shape.Tri) -> i64 { 3 }
+fn sides(s: Shape.Dot) -> i64 { 0 }
+
+
+fn name(s: Shape) -> u8[:] {
+    match s {
+        Circle c => "circle",
+        Rect r => if r.w == r.h { "square" } else { "rectangle" },
+        _ => "other",
+    }
+}
+
+
+
+fn scaled(s: Shape, k: f64) -> Shape {
+    match s {
+        Circle c => Shape.Circle { r: c.r * k },
+        Rect r => Shape.Rect { w: r.w * k, h: r.h * k },
+        Tri t => Shape.Tri { a: t.a * k, b: t.b * k, c: t.c * k },
+        Dot => Shape.Dot,
+    }
+}
+
+
+
+
+
+
+
+
+enum Mark {
+    Circle { r: f64 },
+    Rect { w: f64, h: f64 },
+    Label { text: u8[varint] },
+    Dot,
+}
+
+
+
+
+
+
+var marks:   Mark..[>..]                  = [];
+var mark_at: (Mark..&<u32 in marks>)[>..] = [];
+
+fn main() {
+    
+    
+    
+    
+    var shapes: Shape[>..] = [];
+    shapes.push(Shape.Circle { r: 1.0 });
+    shapes.push(Shape.Rect { w: 2.0, h: 3.0 });
+    shapes.push(Shape.Tri { a: 3.0, b: 4.0, c: 5.0 });
+    shapes.push(Shape.Dot);
+    shapes.push(Shape.Rect { w: 2.0, h: 2.0 });
+    var total = 0.0;
+    for s in shapes {
+        print(name(s), " ", s, " area ", area(s), " sides ", sides(s));
+        total += area(s);
+    }
+    print("total area ", total);
+    
+    shapes[3] = Shape.Circle { r: 0.5 };
+    for &s in shapes { s = scaled(s, 2.0); }
+    print(shapes);
+
+    
+    
+    
+    
+    
+    
+    var packed: Shape..[>..] = [];
+    packed.push(Shape.Circle { r: 1.0 });
+    packed.push(Shape.Dot);
+    packed.push(Shape.Rect { w: 2.0, h: 3.0 });
+    packed.push(Shape.Dot);
+    packed.push(Shape.Tri { a: 3.0, b: 4.0, c: 5.0 });
+    var dots = 0;
+    var widest = 0.0;
+    for s in packed {                    
+        match s {
+            Dot => block { dots++; },
+            Rect &r => block { r.w += 1.0; widest = r.w; },   
+            _ => block {},
+        }
+        print(name(s), " ", area(s));
+    }
+    print(dots, " dots, widest rect now ", widest);
+    print(packed);
+
+    
+    
+    
+    mark_at.push(marks.push(Mark.Label { text: "hello, faloya" }));
+    mark_at.push(marks.push(Mark.Circle { r: 1.5 }));
+    mark_at.push(marks.push(Mark.Dot));
+    mark_at.push(marks.push(Mark.Rect { w: 2.0, h: 3.0 }));
+    mark_at.push(marks.push(Mark.Label { text: "x" }));
+    for i in [3, 0, 4, 1, 2] {           
+        match mark_at[i] {
+            Circle c => print(i, ": circle ", c.r),
+            Rect r => print(i, ": rect ", r.w, " by ", r.h),
+            Label l => print(i, ": label \"", l.text, "\""),
+            Dot => print(i, ": dot"),
+        }
+    }
+    
+    print(marks.len, " marks in ", bytes_of(marks).len, " bytes");
+}

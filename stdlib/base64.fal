@@ -1,0 +1,113 @@
+
+
+
+
+
+
+
+
+namespace base64;
+
+import std;
+
+
+let INVALID: u8 = 255;
+
+
+
+
+fn symbol(b: u8) -> u8 {
+    var d: u8 = 'A';
+    if b >= 26 { d = 'a' - 26; }
+    if b >= 52 { d = 252; }             
+    if b == 62 { d = 237; }             
+    if b == 63 { d = 240; }             
+    return b + d;
+}
+
+
+
+fn value(c: u8) -> u8 {
+    var v = INVALID;
+    if c - 'A' < 26 { v = c - 'A'; }
+    if c - 'a' < 26 { v = c - 'a' + 26; }
+    if c - '0' < 10 { v = c - '0' + 52; }
+    if c == '+' { v = 62; }
+    if c == '/' { v = 63; }
+    return v;
+}
+
+
+
+simd fn encode(out: u8[>..]&, src: const u8[:]) {
+    let start = out.len;
+    out.resize(start + (src.len + 2) / 3 * 4, 0);
+    let dst = out[start..];
+    var s = src;
+    var d = dst;
+    
+    
+    while s.len >= 3 && d.len >= 4 {
+        d[0] = symbol(s[0] >> 2);
+        d[1] = symbol((s[0] & 3) << 4 | s[1] >> 4);
+        d[2] = symbol((s[1] & 15) << 2 | s[2] >> 6);
+        d[3] = symbol(s[2] & 63);
+        s = s[3..];
+        d = d[4..];
+    }
+    if s.len > 0 && d.len >= 4 {
+        let s1: u8 = if s.len == 2 { s[1] } else { 0 };
+        d[0] = symbol(s[0] >> 2);
+        d[1] = symbol((s[0] & 3) << 4 | s1 >> 4);
+        d[2] = if s.len == 2 { symbol((s1 & 15) << 2) } else { '=' };
+        d[3] = '=';
+    }
+}
+
+
+
+
+simd fn decode(out: u8[>..]&, src: const u8[:]) -> bool {
+    if src.len % 4 != 0 { return false; }
+    var padding = 0;
+    if src.len > 0 && src[src.len - 1] == '=' {
+        padding = if src[src.len - 2] == '=' { 2 } else { 1 };
+    }
+    let body = src[..src.len - (if padding > 0 { 4 } else { 0 })];
+    let start = out.len;
+    out.resize(start + body.len / 4 * 3 + (if padding > 0 { 3 - padding } else { 0 }), 0);
+    let dst = out[start..];
+    var s = body;
+    var o = dst;
+    
+    
+    
+    var seen: u8 = 0;
+    while s.len >= 4 && o.len >= 3 {
+        let a = value(s[0]);
+        let b = value(s[1]);
+        let c = value(s[2]);
+        let d = value(s[3]);
+        seen |= a | b | c | d;
+        o[0] = a << 2 | b >> 4;
+        o[1] = b << 4 | c >> 2;
+        o[2] = c << 6 | d;
+        s = s[4..];
+        o = o[3..];
+    }
+    var valid = seen != INVALID;
+    if valid && padding > 0 {
+        let tail = src[body.len..];
+        let a = value(tail[0]);
+        let b = value(tail[1]);
+        let c = if padding == 1 { value(tail[2]) } else { 0 };
+        if (a | b | c) == INVALID {
+            valid = false;
+        } else if o.len >= 1 {
+            o[0] = a << 2 | b >> 4;
+            if padding == 1 && o.len >= 2 { o[1] = b << 4 | c >> 2; }
+        }
+    }
+    if !valid { out.resize(start); }
+    return valid;
+}

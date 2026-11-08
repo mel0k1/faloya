@@ -1,0 +1,126 @@
+
+
+
+
+
+
+
+
+
+import std;
+
+
+
+struct Person { name: u8[..16], age: i32 }
+
+fn format(out: u8[>..]&, p: Person) {
+    format(out, p.name, " (", p.age, ")");
+}
+
+fn main() {
+    
+    
+    
+    var s: u8[>..] = [];                 
+    s.append("Hello");
+    s.push(',');
+    s.push(' ');
+    format(s, "world! ", 6 * 7, " ", 2.5);
+    print(s, " [", s.len, " bytes]");
+    let joined = str("pi=", 3.14159, " e=", 2.71828);   
+    print(joined);
+    
+    var t: u8[>..] = [];
+    format_int(t, 255, 16, 4, '0'); t.push(' ');
+    format_int(t, 255, 2, 10, ' '); t.push(' ');
+    format_flt(t, 2.0 / 3.0, 3);
+    print(t);
+
+    
+    
+    
+    let line = "  key = some value  ";
+    let body = trim(line);
+    let eq = find(body, "=");
+    let key = trim(body[..eq]);
+    let value = trim(body[eq + 1..]);
+    print("'", body, "' -> '", key, "' / '", value, "'");
+    print(starts_with(body, "key"), " ", ends_with(body, "value"), " ", find(body, "zzz"));
+
+    
+    
+    
+    let csv = "alice,30,paris,,bob,25";
+    let parts = split(csv, ',');         
+    print(parts.len, " parts: ", parts);
+    var upper: u8[>..] = [];
+    each_split("one two  three", ' ') {  
+        if it.len > 0 {
+            upper.append(it);
+            to_upper(upper[^it.len..]);  
+            upper.push('|');
+        }
+    };
+    print(upper);
+    var out: u8[>..] = [];
+    join(out, parts, " | ");
+    print(out);
+
+    
+    for p in parts {
+        let v, ok = parse_int(p);
+        if ok { print("  number ", v); } else { print("  text '", p, "'"); }
+    }
+    let f, fok = parse_flt("-2.5e3");
+    print(f, " ", fok);
+    let h, hok = parse_int("ff", 16);
+    print(h, " ", hok);
+
+    
+    
+    
+    
+    var names: u8[][>..] = [];
+    names.push("delta"); names.push("alpha"); names.push("charlie"); names.push("bravo");
+    var views: u8[:][>..] = [];
+    for n in names { views.push(n[..]); }
+    sort(views) { a, b => compare(a, b) < 0 };
+    print(views);
+    print(compare("abc", "abd"), " ", compare("b", "a"), " ", "abc" == "abc");
+
+    
+    var r: u8[>..] = [];
+    format_replaced(r, "the cat sat on the mat", "at", "og");
+    print(r);
+    var lower: u8[>..] = [];
+    lower.append("MiXeD Case");
+    to_lower(lower);
+    print(lower);
+
+    
+    
+    let greek = "αβγ";
+    print(greek.len, " bytes, ", greek[0], " first byte");
+    var cps = 0;
+    each_utf8(greek) { cps++; };
+    var back: u8[>..] = [];
+    each_utf8(greek) { push_utf8(back, it + 1); };   
+    print(cps, " code points; shifted: ", back);
+    
+    var caps: u8[>..] = [];
+    for c in "abc" { caps.push(c - 'a' + 'A'); }
+    print("abc"[0], " ", caps, " ", str('a'));
+
+    
+    
+    
+    var people: Person[>..] = [];
+    people.push(Person { name: "ada", age: 36 });
+    people.push(Person { name: "grace", age: 45 });
+    var p2 = Person { name: "", age: 20 };
+    format(p2.name, "linus");            
+    people.push(p2);
+    print(people);
+    for &p in people { p.age += 1; }
+    print(str(people[0]), " ", people[2].name.len, "/", people[2].name.cap);
+}

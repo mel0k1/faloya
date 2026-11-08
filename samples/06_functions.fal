@@ -1,0 +1,106 @@
+
+
+
+
+
+
+
+
+
+import std;
+
+
+
+fn twice(x) { x + x }
+
+
+fn span<T>(a: T, b: T) -> T { if a > b { a - b } else { b - a } }
+
+
+
+fn describe(x: i64) -> u8[>..] { str("int ", x) }
+fn describe(x: f64) -> u8[>..] { str("float ", x) }
+fn describe(xs: i64[:]) -> u8[>..] { str(xs.len, " ints, first ", xs[0]) }
+
+
+
+fn each_pair<T, F>(xs: T[:]) {
+    for i in 0..xs.len - 1 { F(xs[i], xs[i + 1]); }
+}
+
+
+
+fn best_by<T, F>(xs: T[:]) -> T {
+    var b = xs[0];
+    var bk = F(b);
+    for x in xs[1..] {
+        let k = F(x);
+        if k > bk { b = x; bk = k; }
+    }
+    return b;
+}
+
+
+
+fn each_step<F>(lo: i64, hi: i64, step: i64) {
+    var i = lo;
+    while i < hi { F(i); i += step; }
+}
+
+struct Employee { name: u8[..12], dept: u8[..8], salary: i32 }
+
+
+fn first_multiple_of_7(lo: i64, hi: i64) -> i64 {
+    each_step(lo, hi, 3) { if it % 7 == 0 { return it; } };
+    return -1;
+}
+
+fn main() {
+    print(twice(21), " ", twice(1.5), " ", span(3, 8), " ", span(2.5, 1.0));
+    var xs: i64[>..] = [4, 8, 15, 16, 23, 42];
+    
+    print(describe(7), "; ", 2.5.describe(), "; ", xs.describe(), "; ", describe(xs[2..]));
+    print(twice(3).describe());
+
+    
+    
+    var gaps: i64[>..] = [];
+    each_pair(xs) { a, b => gaps.push(b - a); };   
+    print("gaps ", gaps);
+    print("biggest gap ", max(gaps), " at ", max_by(gaps) { it });
+    print(first_multiple_of_7(10, 40), " ", first_multiple_of_7(10, 12));
+
+    
+    
+    
+    let evens = xs.filter() { it % 2 == 0 };
+    let squares = xs.map() { it * it };
+    let total = fold(xs, 0) { acc, x => acc + x };
+    print(evens, " ", squares, " ", total, " ", xs.any() { it > 40 }, " ", xs.count() { it < 10 });
+
+    var staff: Employee[>..] = [];
+    staff.push(Employee { name: "ada", dept: "eng", salary: 120 });
+    staff.push(Employee { name: "grace", dept: "eng", salary: 135 });
+    staff.push(Employee { name: "linus", dept: "ops", salary: 90 });
+    staff.push(Employee { name: "ken", dept: "ops", salary: 95 });
+    let top = best_by(staff) { it.salary };
+    print("top earner ", top.name);
+    sort(staff) { a, b => a.salary > b.salary };
+    for e in staff { print("  ", e.name, " ", e.dept, " ", e.salary); }
+
+    
+    
+    var budget = 0;
+    var seen = 0;
+    fn spend(e: Employee&) {
+        budget += e.salary;
+        seen++;
+    }
+    for &e in staff { if e.dept == "eng" { spend(e); } }
+    print("eng budget ", budget, " over ", seen, " people");
+
+    
+    fn by_name(a: Employee, b: Employee) -> bool { compare(a.name[..], b.name[..]) < 0 }
+    sort(staff, by_name);
+    for e in staff { print("  ", e.name); }
+}

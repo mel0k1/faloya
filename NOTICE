@@ -1,0 +1,11 @@
+Faloya
+Copyright 2026 mel0k1
+
+This product includes software developed as part of the Goose project
+(https://github.com/aardappel/goose) by Wouter van Oortmerssen and
+contributors, licensed under the Apache License, Version 2.0.
+
+Faloya is a fork of Goose. Changes include the "${...}" string
+interpolation syntax, the ".fal" source file extension, renamed
+user-facing commands, directories and environment variables, and a
+trimmed set of samples and tests.

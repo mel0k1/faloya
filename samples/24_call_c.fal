@@ -1,0 +1,58 @@
+
+
+
+
+
+
+
+
+
+
+
+
+import std;
+
+struct Stats { lo: i32, hi: i32, mean: f64 }
+
+
+extern fn cube_root(x: f64) -> f64 = "cbrt";
+extern fn hypot(x: f64, y: f64) -> f64;
+
+
+extern fn c_abs(x: i32) -> i32 = "abs";
+
+
+extern fn crc32_bytes(s: const u8[:]) -> u32;
+
+extern fn stats_of(xs: i32[:], out: Stats&);
+
+extern fn c_version(out: u8[>..]&);
+
+fn main() {
+    
+    
+    var cube: u8[>..] = [];
+    format_flt(cube, cube_root(27.0), 3);
+    print(cube, " ", hypot(3.0, 4.0), " ", c_abs(-42));
+
+    
+    
+    print(crc32_bytes("The quick brown fox jumps over the lazy dog"));
+    var text: u8[>..] = [];
+    for i in 1000 { format(text, i, ","); }
+    print(text.len, " bytes, crc ", crc32_bytes(text), " / ", crc32_bytes(text[..100]));
+
+    var xs: i32[>..] = [];
+    var r = rng { 5 };
+    for i in 100 { xs.push(r.rand_int(1000) as i32 - 500); }
+    var st = Stats { lo: 0, hi: 0, mean: 0.0 };
+    stats_of(xs, st);
+    print(st);
+    stats_of(xs[..10], st);
+    print(st.lo, " ", st.hi, " ", st.mean);
+
+    var v: u8[>..] = [];
+    v.append("built against ");
+    c_version(v);
+    print(v);
+}

@@ -1,0 +1,172 @@
+
+
+
+
+
+
+
+
+
+
+fn total(xs: i64[:]) -> i64 {
+    var t = 0;
+    for x in xs { t += x; }
+    return t;
+}
+
+
+
+fn divide(a: i64, b: i64) -> i64, bool {
+    if b == 0 { return 0, false; }
+    return a / b, true;
+}
+
+
+fn first_at_least(xs: i64[:], min: i64) -> i64? {
+    for &x in xs { if x >= min { return x; } }
+    return null;
+}
+
+
+
+fn larger(a, b) { if a > b { a } else { b } }
+
+
+
+struct Point { x: f64, y: f64 }
+struct Player { name: u8[..16], pos: Point, hp: i32 = 100, alive: bool = true }
+
+fn main() {
+    
+    
+    
+    
+    let answer = 42;
+    var count: i32 = 0;
+    let byte: u8 = 255;
+    let ratio = 0.75;
+    let single: f32 = 1.5;
+    let yes = 3 > 2;
+    count += 1;
+    count++;
+    print("answer=", answer, " count=", count, " byte=", byte, " ratio=", ratio,
+          " single=", single, " yes=", yes);
+
+    
+    
+    
+    let wrapped: u8 = byte + 1;          
+    let widened = byte + answer;         
+    let narrowed = answer as u8;         
+    print(wrapped, " ", widened, " ", narrowed);
+    
+    
+    print(-7 % 3, " ", 7 % -3);
+
+    
+    
+    
+    var fixed: i32[4] = [1, 2, 3, 4];
+    fixed[0] = 10;
+    let zeros: f64[8] = [0.0; 8];        
+    
+    
+    
+    
+    var grow: i64[>..] = [];
+    for i in 5 { grow.push(i * i); }
+    
+    var stack: i64[>..<] = [];
+    stack.push(1); stack.push(2); stack.push(3);
+    let top = stack.pop();
+    
+    
+    var small: u8[..8] = [];
+    small.push('h'); small.push('i');
+    
+    let frozen: i64[] = [7, 8, 9];
+    print(fixed, " ", zeros.len, " ", grow, " ", stack, " ", top, " ",
+          small, " ", small.len, "/", small.cap, " ", frozen);
+
+    
+    
+    
+    var s: u8[>..] = [];
+    s.append("hello");
+    s.push(' ');
+    format(s, "x", 1, " ", 2.5);
+    print(s, " (", s.len, " bytes)");
+
+    
+    
+    
+    
+    let middle = grow[1..4];
+    let last_two = grow[^2..];
+    print(middle, " ", last_two, " ", total(middle), " ", total(grow), " ", total(fixed_sum(fixed)));
+
+    
+    
+    
+    var p = Player { name: "gus", pos: Point { 1.0, 2.0 } };
+    p.hp -= 30;
+    p.pos = p.pos + Point { 0.5, 0.5 };  
+    print(p);
+    print(p.name, " at ", p.pos.x, ",", p.pos.y, " hp ", p.hp);
+
+    
+    
+    
+    let kind = if p.hp > 50 { "healthy" } else { "hurt" };
+    let level = match p.hp { 0 => "dead", 1..50 => "low", _ => "fine" };
+    print(kind, " ", level);
+    
+    
+    
+    let verdict = block {
+        guard p.alive else { break "gone"; }
+        guard p.hp > 0 else { break "dead"; }
+        "standing"
+    };
+    print(verdict);
+
+    
+    var acc = 0;
+    for i in 3 { acc += i; }             
+    for i in 10..13 { acc += i; }        
+    for x in fixed { acc += x; }         
+    for &x in fixed { x *= 2; }          
+    for x, i in frozen { acc += x * i; } 
+    var n = 0;
+    while n < 3 { n++; }
+    loop { n--; if n == 0 { break; } }
+    print(acc, " ", fixed, " ", n);
+
+    
+    
+    
+    let q, ok = divide(7, 2);
+    let q2, ok2 = divide(1, 0);
+    print(q, " ", ok, " ", q2, " ", ok2);
+    
+    
+    let big = first_at_least(grow, 5);
+    if big { print("first >= 5 is ", big); } else { print("none"); }
+    let none = first_at_least(grow, 100);
+    print(none == null);
+    
+    
+    
+    var r .= grow[0];
+    r = 100;
+    r .= grow[1];
+    r += 1;
+    print(grow, " ", grow.index_of(r), " ", r .== grow[1]);
+    print(larger(3, 9), " ", larger(2.5, 1.5));
+}
+
+
+
+fn fixed_sum(xs: i32[4]) -> i64[4] {
+    return [xs[0], xs[1], xs[2], xs[3]];
+}

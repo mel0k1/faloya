@@ -1,0 +1,131 @@
+
+
+
+
+
+
+
+
+
+
+import std;
+
+enum Op {
+    Push { v: i64 },                     
+    Load { slot: u8 },                   
+    Store { slot: u8 },                  
+    Add, Sub, Mul,                       
+    Dup,                                 
+    Jump { to: u16 },                    
+    JumpIfZero { to: u16 },              
+    Print,                               
+    Halt,
+}
+
+struct Vm { stack: i64[>..<] }
+
+fn op_name(o: Op) -> u8[:] {
+    match o {
+        Push p => "push", Load l => "load", Store s => "store", Add => "add", Sub => "sub",
+        Mul => "mul", Dup => "dup", Jump j => "jump", JumpIfZero j => "jz",
+        Print => "print", Halt => "halt",
+    }
+}
+
+
+fn disassemble(code: Op[:]) {
+    for o, i in code {
+        var l: u8[>..] = [];
+        format_int(l, i, 10, 3, ' ');
+        format(l, "  ", op_name(o));
+        match o {
+            Push p => format(l, " ", p.v),
+            Load v => format(l, " ", v.slot),
+            Store v => format(l, " ", v.slot),
+            Jump j => format(l, " ", j.to),
+            JumpIfZero j => format(l, " ", j.to),
+            _ => {},
+        }
+        print(l);
+    }
+}
+
+
+
+
+
+fn run(code: Op[:]) -> i64 {
+    var stack:  i64[>..<] = [];
+    var locals: i64[8]    = [0; 8];
+    var pc = 0;
+    var steps = 0;
+    loop {
+        let op = code[pc];
+        pc++;
+        steps++;
+        match op {
+            Push p => { stack.push(p.v); },
+            Load l => { stack.push(locals[l.slot]); },
+            Store s => { locals[s.slot] = stack.pop(); },
+            Add => { let b = stack.pop(); let a = stack.pop(); stack.push(a + b); },
+            Sub => { let b = stack.pop(); let a = stack.pop(); stack.push(a - b); },
+            Mul => { let b = stack.pop(); let a = stack.pop(); stack.push(a * b); },
+            Dup => { let a = stack.pop(); stack.push(a); stack.push(a); },
+            Jump j => { pc = j.to; },
+            JumpIfZero j => { if stack.pop() == 0 { pc = j.to; } },
+            Print => { print("  out: ", stack.pop()); },
+            Halt => { break; },
+        }
+    }
+    return steps;
+}
+
+fn main() {
+    
+    var countdown: Op[>..] = [];
+    countdown.push(Op.Push { v: 3 });
+    countdown.push(Op.Store { slot: 0 });
+    countdown.push(Op.Load { slot: 0 });         
+    countdown.push(Op.JumpIfZero { to: 10 });
+    countdown.push(Op.Load { slot: 0 });
+    countdown.push(Op.Print);
+    countdown.push(Op.Load { slot: 0 });
+    countdown.push(Op.Push { v: 1 });
+    countdown.push(Op.Sub);
+    countdown.push(Op.Store { slot: 0 });
+    countdown.push(Op.Jump { to: 2 });           
+    countdown.push(Op.Halt);
+    
+    
+    countdown[3] = Op.JumpIfZero { to: 11 };
+    print("countdown:");
+    disassemble(countdown);
+    let steps = run(countdown);
+    print("ran ", steps, " instructions");
+
+    
+    var fact: Op[>..] = [];
+    fact.push(Op.Push { v: 1 });
+    fact.push(Op.Store { slot: 1 });             
+    fact.push(Op.Push { v: 10 });
+    fact.push(Op.Store { slot: 0 });             
+    fact.push(Op.Load { slot: 0 });              
+    fact.push(Op.JumpIfZero { to: 15 });
+    fact.push(Op.Load { slot: 1 });
+    fact.push(Op.Load { slot: 0 });
+    fact.push(Op.Mul);
+    fact.push(Op.Store { slot: 1 });
+    fact.push(Op.Load { slot: 0 });
+    fact.push(Op.Push { v: 1 });
+    fact.push(Op.Sub);
+    fact.push(Op.Store { slot: 0 });
+    fact.push(Op.Jump { to: 4 });
+    fact.push(Op.Load { slot: 1 });              
+    fact.push(Op.Print);
+    fact.push(Op.Halt);
+    print("factorial:");
+    disassemble(fact);
+    let steps2 = run(fact);
+    print("ran ", steps2, " instructions");
+    print("an instruction is ", 1 + 8, " bytes: a tag and the largest operand");
+}

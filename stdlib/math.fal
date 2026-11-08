@@ -1,0 +1,105 @@
+
+
+
+
+
+
+
+
+
+extern fn sqrt(x: f64) -> f64 = "gs_sqrt";            extern fn sqrt(x: f32) -> f32 = "gs_sqrtf";
+extern fn sin(x: f64) -> f64 = "gs_sin";              extern fn sin(x: f32) -> f32 = "gs_sinf";
+extern fn cos(x: f64) -> f64 = "gs_cos";              extern fn cos(x: f32) -> f32 = "gs_cosf";
+extern fn tan(x: f64) -> f64 = "gs_tan";              extern fn tan(x: f32) -> f32 = "gs_tanf";
+extern fn asin(x: f64) -> f64 = "gs_asin";            extern fn asin(x: f32) -> f32 = "gs_asinf";
+extern fn acos(x: f64) -> f64 = "gs_acos";            extern fn acos(x: f32) -> f32 = "gs_acosf";
+extern fn atan(x: f64) -> f64 = "gs_atan";            extern fn atan(x: f32) -> f32 = "gs_atanf";
+extern fn atan2(y: f64, x: f64) -> f64 = "gs_atan2";  extern fn atan2(y: f32, x: f32) -> f32 = "gs_atan2f";
+extern fn exp(x: f64) -> f64 = "gs_exp";              extern fn exp(x: f32) -> f32 = "gs_expf";
+extern fn log(x: f64) -> f64 = "gs_log";              extern fn log(x: f32) -> f32 = "gs_logf";
+extern fn log2(x: f64) -> f64 = "gs_log2";            extern fn log2(x: f32) -> f32 = "gs_log2f";
+extern fn log10(x: f64) -> f64 = "gs_log10";          extern fn log10(x: f32) -> f32 = "gs_log10f";
+extern fn pow(x: f64, y: f64) -> f64 = "gs_pow";      extern fn pow(x: f32, y: f32) -> f32 = "gs_powf";
+extern fn hypot(x: f64, y: f64) -> f64 = "gs_hypot";  extern fn hypot(x: f32, y: f32) -> f32 = "gs_hypotf";
+extern fn cbrt(x: f64) -> f64 = "gs_cbrt";            extern fn cbrt(x: f32) -> f32 = "gs_cbrtf";
+extern fn exp2(x: f64) -> f64 = "gs_exp2";            extern fn exp2(x: f32) -> f32 = "gs_exp2f";
+extern fn expm1(x: f64) -> f64 = "gs_expm1";          extern fn expm1(x: f32) -> f32 = "gs_expm1f";
+extern fn log1p(x: f64) -> f64 = "gs_log1p";          extern fn log1p(x: f32) -> f32 = "gs_log1pf";
+extern fn sinh(x: f64) -> f64 = "gs_sinh";            extern fn sinh(x: f32) -> f32 = "gs_sinhf";
+extern fn cosh(x: f64) -> f64 = "gs_cosh";            extern fn cosh(x: f32) -> f32 = "gs_coshf";
+extern fn tanh(x: f64) -> f64 = "gs_tanh";            extern fn tanh(x: f32) -> f32 = "gs_tanhf";
+
+
+
+extern fn mul_add(x: f64, y: f64, z: f64) -> f64 = "gs_mul_add";
+extern fn mul_add(x: f32, y: f32, z: f32) -> f32 = "gs_mul_addf";
+extern fn floor(x: f64) -> f64;                       extern fn floor(x: f32) -> f32 = "floorf";
+extern fn ceil(x: f64) -> f64;                        extern fn ceil(x: f32) -> f32 = "ceilf";
+extern fn round(x: f64) -> f64;                       extern fn round(x: f32) -> f32 = "roundf";
+extern fn trunc(x: f64) -> f64;                       extern fn trunc(x: f32) -> f32 = "truncf";
+
+
+extern fn copysign(x: f64, y: f64) -> f64;            extern fn copysign(x: f32, y: f32) -> f32 = "copysignf";
+
+let PI = 3.141592653589793;
+let TAU = 6.283185307179586;
+let E = 2.718281828459045;
+let INF = 1.0 / 0.0;
+let NAN = 0.0 / 0.0;
+
+
+
+
+checkfree fn radians(deg: f64) -> f64 { deg * (PI / 180.0) }
+checkfree fn radians(deg: f32) -> f32 { deg * 0.017453292519943295 }
+checkfree fn degrees(rad: f64) -> f64 { rad * (180.0 / PI) }
+checkfree fn degrees(rad: f32) -> f32 { rad * 57.29577951308232 }
+
+
+checkfree fn is_nan(x: f64) -> bool { x != x }
+checkfree fn is_nan(x: f32) -> bool { x != x }
+checkfree fn is_inf(x: f64) -> bool { x == x && (x - x) != (x - x) }
+checkfree fn is_inf(x: f32) -> bool { x == x && (x - x) != (x - x) }
+checkfree fn is_finite(x: f64) -> bool { x - x == 0.0 }
+checkfree fn is_finite(x: f32) -> bool { x - x == 0.0 }
+
+
+
+
+checkfree fn fract(x: f64) -> f64 { x - floor(x) }
+checkfree fn fract(x: f32) -> f32 { x - floor(x) }
+
+
+
+
+checkfree fn inverse_lerp(a: f64, b: f64, v: f64) -> f64 { (v - a) / (b - a) }
+checkfree fn inverse_lerp(a: f32, b: f32, v: f32) -> f32 { (v - a) / (b - a) }
+
+
+
+
+
+checkfree fn smoothstep(edge0: f64, edge1: f64, x: f64) -> f64 {
+    var t = (x - edge0) / (edge1 - edge0);
+    if t < 0.0 { t = 0.0; } else if t > 1.0 { t = 1.0; }
+    t * t * (3.0 - 2.0 * t)
+}
+checkfree fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    var t = (x - edge0) / (edge1 - edge0);
+    if t < 0.0 { t = 0.0; } else if t > 1.0 { t = 1.0; }
+    t * t * (3.0 - 2.0 * t)
+}
+
+
+
+
+checkfree fn wrap_angle(x: f64) -> f64 {
+    var r = x - TAU * floor((x + PI) / TAU);
+    if r >= PI { r -= TAU; } else if r < -PI { r += TAU; }
+    r
+}
+checkfree fn wrap_angle(x: f32) -> f32 {
+    var r = x - TAU * floor((x + PI) / TAU);
+    if r >= PI { r -= TAU; } else if r < -PI { r += TAU; }
+    r
+}

@@ -1,0 +1,114 @@
+
+
+
+
+
+
+
+
+
+
+
+import slot_pool;
+import std;
+
+struct Node { val: i64, prev: Node&<u32 in pool.items>, next: Node&<u32 in pool.items> }
+
+var pool = slot_pool<Node> {};
+
+let head = pool.alloc_index_with() { Node { val: 0, prev: self, next: self } };
+
+
+fn insert_after(p: Node&, v: i64) -> Node& {
+    
+    
+    
+    let n .= pool.alloc_with() { Node { val: v, prev: p, next: p.next } };
+    n.next.prev .= n;
+    p.next .= n;
+    return n;
+}
+
+
+
+fn remove(n: Node&) {
+    n.prev.next .= n.next;
+    n.next.prev .= n.prev;
+    pool.free_ref(n);
+}
+
+fn push_front(v: i64) -> Node& { insert_after(pool.items[head], v) }
+fn push_back(v: i64) -> Node& { insert_after(pool.items[head].prev, v) }
+
+
+fn is_end(n: Node&) -> bool { n .== pool.items[head] }
+
+fn pop_front() -> i64 {
+    let n .= pool.items[head].next;
+    assert(!is_end(n));
+    let v = n.val;
+    remove(n);
+    return v;
+}
+
+
+fn each<F>() {
+    var n .= pool.items[head].next;
+    while !is_end(n) {
+        let next .= n.next;              
+        F(n);
+        n .= next;
+    }
+}
+
+fn show(label: u8[:]) {
+    var line: u8[>..] = [];
+    format(line, label, ":");
+    each() { format(line, " ", it.val); };
+    format(line, "   (", pool.items.len, " slots)");
+    print(line);
+}
+
+fn main() {
+    for i in 1..6 { push_back(i * 10); }
+    push_front(5);
+    show("built");
+
+    
+    
+    each() { if it.val % 20 == 0 { remove(it); } };
+    show("evens removed");
+
+    
+    push_back(7);
+    push_back(8);
+    push_back(9);
+    show("three more");
+
+    print("popped ", pop_front(), " and ", pop_front());
+    show("after pops");
+
+    
+    
+    var n .= pool.items[head].next;
+    while !is_end(n) {
+        let next .= n.next;
+        if n.val == 9 {
+            n.prev.next .= n.next;
+            n.next.prev .= n.prev;
+            n.prev .= pool.items[head];
+            n.next .= pool.items[head].next;
+            n.next.prev .= n;
+            pool.items[head].next .= n;
+        }
+        n .= next;
+    }
+    show("9 moved to front");
+
+    
+    var back: u8[>..] = [];
+    var b .= pool.items[head].prev;
+    while !is_end(b) { format(back, " ", b.val); b .= b.prev; }
+    print("backwards:", back);
+    print("a node is ", 8 + 4 + 4, " bytes: the value and two 4-byte links");
+}

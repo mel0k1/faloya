@@ -1,0 +1,82 @@
+
+
+
+
+
+import std;
+
+
+
+
+
+extern fn trim_memory() -> bool = "gs_trim_memory";
+
+
+extern fn read_file(path: const u8[:], out: u8[>..]&) -> bool = "gs_os_read_file";    
+extern fn write_file(path: const u8[:], data: const u8[:]) -> bool = "gs_os_write_file";
+
+extern fn write_file_atomic(path: const u8[:], data: const u8[:]) -> bool = "gs_os_write_file_atomic";
+extern fn append_file(path: const u8[:], data: const u8[:]) -> bool = "gs_os_append_file";
+extern fn file_exists(path: const u8[:]) -> bool = "gs_os_file_exists";    
+extern fn delete_file(path: const u8[:]) -> bool = "gs_os_remove_file";
+
+extern fn rename_file(from: const u8[:], to: const u8[:]) -> bool = "gs_os_rename_file";
+
+
+extern fn make_dir(path: const u8[:]) -> bool = "gs_os_make_dir";         
+extern fn is_dir(path: const u8[:]) -> bool = "gs_os_is_dir";
+extern fn delete_dir(path: const u8[:]) -> bool = "gs_os_remove_dir";     
+
+extern fn list_dir(path: const u8[:], out: u8[>..]&) -> bool = "gs_os_list_dir";
+
+
+extern fn read_line(out: u8[>..]&) -> bool = "gs_os_read_line";  
+extern fn read_stdin(out: u8[>..]&) = "gs_os_read_stdin";        
+extern fn read_stdin(out: u8[>..]&, max: i64) -> bool = "gs_os_read_stdin_max";  
+extern fn write_stdout(s: const u8[:]) = "gs_os_write_stdout";
+extern fn write_stderr(s: const u8[:]) = "gs_os_write_stderr";
+extern fn flush_stdout() = "gs_os_flush_stdout";
+
+
+extern fn arg_count() -> i64 = "gs_os_arg_count";
+extern fn arg(i: i64, out: u8[>..]&) = "gs_os_arg";            
+extern fn env(name: const u8[:], out: u8[>..]&) -> bool = "gs_os_getenv";
+
+
+
+
+
+extern fn resource_dir(out: u8[>..]&) -> bool = "gs_os_resource_dir";
+fn resource_dir() -> u8[>..] {
+    var out: u8[>..] = [];
+    if !resource_dir(out) { abort("cannot locate the application resource directory"); }
+    return out;
+}
+
+
+
+var argv_text: u8[>..] = [];
+
+fn args() -> u8[:][>..] {
+    var out: u8[:][>..] = [];
+    for i in arg_count() {
+        let start = argv_text.len;
+        arg(i, argv_text);
+        out.push(argv_text[start..]);
+    }
+    return out;
+}
+
+
+extern fn time_ns() -> i64 = "gs_os_time_ns";    
+extern fn clock_ns() -> i64 = "gs_os_clock_ns";  
+extern fn sleep_ms(ms: i64) = "gs_os_sleep_ms";
+
+
+
+fn time() -> f64 { time_ns() / 1000000000.0 }
+fn clock() -> f64 { clock_ns() / 1000000000.0 }
+fn sleep(seconds: f64) { sleep_ms((seconds * 1000.0) as! i64) }
+
+
+extern fn random_seed() -> u64 = "gs_os_random_u64";

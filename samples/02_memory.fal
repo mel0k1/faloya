@@ -1,0 +1,105 @@
+
+
+
+
+
+
+
+
+import slot_pool;
+import std;
+
+struct Item { id: i32, weight: f32 }
+
+
+
+struct Row { label: u8[..12], cells: i32[..8] }
+
+fn reset(buf: u8[>..]&) { buf.clear(); }
+
+fn main() {
+    
+    
+    
+    var items: Item[>..] = [];
+    let first: Item& = items.push(Item { 1, 0.5 });
+    for i in 2..100001 { items.push(Item { i as i32, i * 0.5 }); }
+    first.weight = 99.5;                 
+    print(items.len, " items, first weight ", items[0].weight);
+
+    
+    
+    
+    for round in 3 {
+        var scratch: u8[>..] = [];
+        for i in 10000 { scratch.push((i % 256) as! u8); }
+        print("round ", round, ": ", scratch.len, " bytes of scratch");
+    }
+
+    
+    
+    
+    
+    
+    var line: u8[>..] = [];
+    for i in 3 {
+        reset(line);
+        format(line, "line ", i + 1, " of 3");
+        print(line);
+    }
+
+    
+    
+    
+    
+    var words: u8[][>..] = [];
+    for i in 5 { words.push(str("word", i)); }   
+    var bytes = 0;
+    for w in words { bytes += w.len; }
+    print(words.len, " words, ", bytes, " bytes of text, ", words.len * 4 + bytes,
+          " bytes in total (4-byte lengths)");
+
+    
+    
+    var a: i64[>..] = [1, 2, 3];
+    var b = copy(a);
+    b.push(4);
+    var item2 = items[1];                
+    item2.weight = 0.0;
+    print(a, " ", b, " ", items[1].weight);
+
+    
+    
+    
+    var stack: i64[>..<] = [];
+    for i in 5 { stack.push(i * 10); }
+    var popped = 0;
+    while stack.len > 2 { popped += stack.pop(); }
+    print(stack, " popped ", popped);
+
+    
+    
+    
+    var rows: Row[>..] = [];
+    for r in 3 {
+        var row = Row { label: "row", cells: [] };
+        format(row.label, r);
+        for c in r + 1 { row.cells.push((r * 10 + c) as i32); }
+        rows.push(row);
+    }
+    for row in rows { print(row.label, ": ", row.cells, " (", row.cells.len, "/", row.cells.cap, ")"); }
+
+    
+    
+    
+    
+    var pool = slot_pool<Item> {};
+    let s0 = pool.alloc_index(Item { 10, 1.0 });
+    let s1 = pool.alloc_index(Item { 11, 1.0 });
+    pool.free(s0);
+    let s2 = pool.alloc_index(Item { 12, 2.0 });   
+    print("slots ", s0, " ", s1, " ", s2, ", pool length ", pool.items.len);
+    let node: Item& = pool.alloc_ref(Item { 13, 3.0 });
+    pool.free_ref(node);
+    print("pool length ", pool.items.len);
+}
