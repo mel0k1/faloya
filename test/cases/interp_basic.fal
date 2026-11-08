@@ -1,0 +1,7 @@
+fn main() {
+    let name = "мир";
+    let year = 2026;
+    print("Привет, ${name}! Уже ${year} год.");
+    let greeting = "Привет, ${name}!";
+    print(greeting);
+}

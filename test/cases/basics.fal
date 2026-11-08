@@ -1,0 +1,17 @@
+fn grade(n: i64) -> u8[:] {
+    match n {
+        10 => "отлично",
+        9 => "почти",
+        _ => "учись",
+    }
+}
+
+fn main() {
+    var f = 1;
+    for i in 1..11 {
+        f = f * i;
+        print("факториал ${i} = ${f}");
+    }
+    print(grade(10));
+    print(grade(5));
+}

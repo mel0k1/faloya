@@ -1,0 +1,5 @@
+fn main() {
+    let a = "Фа";
+    let b = "ёя";
+    print("${a}${b} — ${a}${b}!");
+}

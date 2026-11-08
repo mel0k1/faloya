@@ -1,0 +1,10 @@
+struct Point { x: i32, y: i32 }
+
+fn format(out: u8[>..]&, p: Point) {
+    format(out, "(", p.x, ", ", p.y, ")");
+}
+
+fn main() {
+    let p = Point { x: 3, y: 4 };
+    print("p = ${p}, квадрат длины = ${p.x * p.x + p.y * p.y}");
+}
