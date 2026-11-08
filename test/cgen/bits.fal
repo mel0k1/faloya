@@ -1,0 +1,24 @@
+fn clamp(x: i64, lo: i64, hi: i64) -> i64 {
+    if x < lo { return lo; }
+    if x > hi { return hi; }
+    x
+}
+
+fn main() {
+    var flags: i64 = 0;
+    flags |= 1 << 2;
+    flags |= 4;
+    flags &= ~(1 << 1);
+    print("flags: ", flags);
+    print("bits: ", flags & 5, " ", flags ^ 7, " ", ~flags & 255);
+    var x = -7;
+    print("abs-ish: ", 0 - x, " ", clamp(x, 0 - 10, 10));
+    let big = 1 << 40;
+    print("big: ", big, " ", big / 1024, " ", big % 1000);
+    var u: u64 = 10;
+    u *= u;
+    u += 5;
+    print("u: ", u);
+    print("logic: ", 1 == 1 && 2 == 2, " ", 1 == 2 || 3 == 3, " ", !(1 == 2), " ", 3 == 3, " ", 2 != 2);
+    print("cast: ", 300 as i8 as i64, " ", 1000 as u16 as i64);
+}

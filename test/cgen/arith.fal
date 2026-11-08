@@ -1,0 +1,35 @@
+fn fact(n: i64) -> i64 {
+    var f: i64 = 1;
+    for i in 1..n + 1 { f = f * i; }
+    f
+}
+
+fn fib(n: i64) -> i64 {
+    var a: i64 = 0;
+    var b: i64 = 1;
+    for i in 0..n {
+        let t = a + b;
+        a = b;
+        b = t;
+    }
+    a
+}
+
+fn max2(a: i64, b: i64) -> i64 {
+    if a > b { a } else { b }
+}
+
+fn main() {
+    print("fact(5) = ", fact(5));
+    print("fib(10) = ", fib(10));
+    print("max2(7, 3) = ", max2(7, 3));
+    let a = 40 + 2;
+    if a > 41 { print("big"); } else { print("small"); }
+    var i = 0;
+    while i < 3 {
+        print("tick ", i);
+        i += 1;
+    }
+    print(fact(10), " and ", fact(12));
+    print(5 % 3, " ", 7 / 2, " ", 1 << 10);
+}

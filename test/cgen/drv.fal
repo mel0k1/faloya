@@ -1,0 +1,31 @@
+import ast;
+import cgen;
+import os;
+
+fn main() {
+    let a = args();
+    guard a.len >= 2 else { print("usage: cgendrv <in.fal> [out.c]"); return; }
+    var src: u8[>..] = [];
+    guard read_file(a[1], src) else { print("cannot read ", a[1]); return; }
+    var p: ast::Parser = ast::Parser { .. };
+    let root = ast::parse(src, p);
+    if !p.ok {
+        var m: u8[>..] = [];
+        ast::error_line(p, m);
+        print(m);
+        return;
+    }
+    var g: cgen::Gen = cgen::Gen { .. };
+    cgen::gen(g, p, root);
+    if !g.ok {
+        var m: u8[>..] = [];
+        format(m, "cgen: line ", g.line, ": ", g.msg);
+        print(m);
+        return;
+    }
+    if a.len >= 3 {
+        guard write_file(a[2], g.out) else { print("cannot write ", a[2]); return; }
+        return;
+    }
+    print(g.out);
+}

@@ -25,6 +25,8 @@ jobs:
         run: python3 test/run.py --exe build/faloya
       - name: samples
         run: python3 samples/run_samples.py --exe build/faloya -j 4
+      - name: cgen
+        run: python3 test/cgen/run.py
 
   vscode:
     runs-on: ubuntu-latest

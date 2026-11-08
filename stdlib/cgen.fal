@@ -1,0 +1,896 @@
+namespace cgen;
+import std;
+
+root struct Gen {
+    out: u8[>..] = [],
+    ok: bool = true,
+    msg: const u8[:] = "",
+    line: i32 = 0,
+    names: const u8[:][>..] = [],
+    types: const u8[:][>..] = [],
+    fns: const u8[:][>..] = [],
+    frets: const u8[:][>..] = [],
+    tmp: i64 = 0,
+}
+
+fn fail(g: Gen&, m: const u8[:], p: ast::Parser&, id: i64) {
+    if g.ok {
+        g.ok = false;
+        g.msg = m;
+        g.line = p.nodes[id].line;
+    }
+}
+
+fn first_child(p: ast::Parser&, id: i64) -> i64 { return p.nodes[id].first; }
+
+fn next_of(p: ast::Parser&, id: i64) -> i64 { return p.nodes[id].next; }
+
+fn nth_child(p: ast::Parser&, id: i64, k: i64) -> i64 {
+    var c = p.nodes[id].first;
+    var i: i64 = 0;
+    while c >= 0 {
+        if i == k { return c; }
+        c = p.nodes[c].next;
+        i++;
+    }
+    return -1;
+}
+
+fn child_count(p: ast::Parser&, id: i64) -> i64 {
+    var c = p.nodes[id].first;
+    var i: i64 = 0;
+    while c >= 0 {
+        c = p.nodes[c].next;
+        i++;
+    }
+    return i;
+}
+
+fn text_of(p: ast::Parser&, id: i64) -> const u8[:] { return p.nodes[id].text; }
+
+fn ctype_of(g: Gen&, span: const u8[:]) -> const u8[:] {
+    if span == "i64" || span == "varint" { return "long long"; }
+    if span == "i32" { return "int"; }
+    if span == "i16" { return "short"; }
+    if span == "i8" { return "signed char"; }
+    if span == "u64" { return "unsigned long long"; }
+    if span == "u32" { return "unsigned int"; }
+    if span == "u16" { return "unsigned short"; }
+    if span == "u8" { return "unsigned char"; }
+    if span == "bool" { return "bool"; }
+    return "";
+}
+
+fn is_int_type(ty: const u8[:]) -> bool {
+    return ty == "long long" || ty == "int" || ty == "short" || ty == "signed char"
+        || ty == "unsigned long long" || ty == "unsigned int" || ty == "unsigned short"
+        || ty == "unsigned char" || ty == "bool";
+}
+
+fn is_unsigned(ty: const u8[:]) -> bool {
+    return ty == "unsigned long long" || ty == "unsigned int" || ty == "unsigned short"
+        || ty == "unsigned char";
+}
+
+fn lookup_type(g: Gen&, name: const u8[:]) -> const u8[:] {
+    for i in g.names.len {
+        if g.names[i] == name { return g.types[i]; }
+    }
+    return "";
+}
+
+fn lookup_ret(g: Gen&, name: const u8[:]) -> const u8[:] {
+    for i in g.fns.len {
+        if g.fns[i] == name { return g.frets[i]; }
+    }
+    return "";
+}
+
+fn declare(g: Gen&, name: const u8[:], ty: const u8[:]) {
+    g.names.push(name);
+    g.types.push(ty);
+}
+
+fn is_c_keyword(name: const u8[:]) -> bool {
+    return name == "int" || name == "long" || name == "short" || name == "char"
+        || name == "double" || name == "float" || name == "void" || name == "return"
+        || name == "if" || name == "else" || name == "while" || name == "for" || name == "do"
+        || name == "switch" || name == "case" || name == "default" || name == "break"
+        || name == "continue" || name == "struct" || name == "union" || name == "enum"
+        || name == "static" || name == "unsigned" || name == "signed" || name == "const"
+        || name == "sizeof" || name == "typedef" || name == "goto" || name == "auto"
+        || name == "register" || name == "volatile" || name == "extern";
+}
+
+fn emit(g: Gen&, text: const u8[:]) {
+    for i in text.len { g.out.push(text[i]); }
+}
+
+fn emit_buf(g: Gen&, buf: u8[>..]&) {
+    for i in buf.len { g.out.push(buf[i]); }
+}
+
+fn emit_indent(g: Gen&, depth: i64) {
+    for i in depth { emit(g, "    "); }
+}
+
+fn push_text(out: u8[>..]&, text: const u8[:]) {
+    for i in text.len { out.push(text[i]); }
+}
+
+fn c_fmt_text(content: const u8[:], out: u8[>..]&) {
+    for i in content.len {
+        let c = content[i];
+        if c == '\\' { out.push('\\'); out.push('\\'); }
+        else if c == '"' { out.push('\\'); out.push('"'); }
+        else if c == '%' { out.push('%'); out.push('%'); }
+        else if c == '\n' { out.push('\\'); out.push('n'); }
+        else if c == '\t' { out.push('\\'); out.push('t'); }
+        else if c == '\r' { out.push('\\'); out.push('r'); }
+        else if c == 0 { out.push('\\'); out.push('0'); }
+        else if c < 32 || c >= 127 {
+            let h = (c as i64) >> 4;
+            let l = (c as i64) & 15;
+            out.push('\\');
+            out.push('x');
+            out.push(if h < 10 { '0' + h as u8 } else { 'a' + (h - 10) as u8 });
+            out.push(if l < 10 { '0' + l as u8 } else { 'a' + (l - 10) as u8 });
+        }
+        else { out.push(c); }
+    }
+}
+
+recursive fn expr_type(g: Gen&, p: ast::Parser&, id: i64) -> const u8[:] {
+    var n .= p.nodes[id];
+    if n.k == ast::Nk.Int { return "long long"; }
+    if n.k == ast::Nk.Name {
+        if n.text == "true" || n.text == "false" { return "int"; }
+        return lookup_type(g, n.text);
+    }
+    if n.k == ast::Nk.As {
+        let ty = nth_child(p, id, 1);
+        return ctype_of(g, text_of(p, ty));
+    }
+    if n.k == ast::Nk.Call {
+        let callee = nth_child(p, id, 0);
+        var cn .= p.nodes[callee];
+        if cn.k == ast::Nk.Name { return lookup_ret(g, cn.text); }
+        return "";
+    }
+    if n.k == ast::Nk.Bin {
+        var n2 .= p.nodes[id];
+        if n2.op == ast::Op.Eq || n2.op == ast::Op.Ne || n2.op == ast::Op.Lt
+            || n2.op == ast::Op.Le || n2.op == ast::Op.Gt || n2.op == ast::Op.Ge
+            || n2.op == ast::Op.Land || n2.op == ast::Op.Lor { return "bool"; }
+        let ty = expr_type(g, p, nth_child(p, id, 0));
+        if !g.ok { return ""; }
+        if ty == "" { return "long long"; }
+        return ty;
+    }
+    if n.k == ast::Nk.Un {
+        let ty = expr_type(g, p, nth_child(p, id, 0));
+        if !g.ok { return ""; }
+        if ty == "" { return "long long"; }
+        return ty;
+    }
+    return "";
+}
+
+recursive fn gen_expr(g: Gen&, p: ast::Parser&, id: i64, out: u8[>..]&) {
+    guard g.ok else { return; }
+    var n .= p.nodes[id];
+    if n.k == ast::Nk.Int {
+        var m: u8[>..] = [];
+        format(m, n.val, "LL");
+        push_text(out, m);
+        return;
+    }
+    if n.k == ast::Nk.Name {
+        if n.text == "true" { push_text(out, "true"); return; }
+        if n.text == "false" { push_text(out, "false"); return; }
+        let ty = lookup_type(g, n.text);
+        if ty == "" {
+            fail(g, "unknown variable or unsupported value", p, id);
+            return;
+        }
+        if !is_int_type(ty) {
+            fail(g, "only integer values are supported yet", p, id);
+            return;
+        }
+        push_text(out, n.text);
+        return;
+    }
+    if n.k == ast::Nk.Bin {
+        let l = nth_child(p, id, 0);
+        let r = nth_child(p, id, 1);
+        out.push('(');
+        gen_expr(g, p, l, out);
+        var op: const u8[:] = "";
+        if n.op == ast::Op.Add { op = "+"; }
+        else if n.op == ast::Op.Sub { op = "-"; }
+        else if n.op == ast::Op.Mul { op = "*"; }
+        else if n.op == ast::Op.Div { op = "/"; }
+        else if n.op == ast::Op.Mod { op = "%"; }
+        else if n.op == ast::Op.Shl { op = "<<"; }
+        else if n.op == ast::Op.Shr { op = ">>"; }
+        else if n.op == ast::Op.Band { op = "&"; }
+        else if n.op == ast::Op.Bor { op = "|"; }
+        else if n.op == ast::Op.Xor { op = "^"; }
+        else if n.op == ast::Op.Eq { op = "=="; }
+        else if n.op == ast::Op.Ne { op = "!="; }
+        else if n.op == ast::Op.Lt { op = "<"; }
+        else if n.op == ast::Op.Le { op = "<="; }
+        else if n.op == ast::Op.Gt { op = ">"; }
+        else if n.op == ast::Op.Ge { op = ">="; }
+        else if n.op == ast::Op.Land { op = "&&"; }
+        else if n.op == ast::Op.Lor { op = "||"; }
+        else {
+            fail(g, "unsupported binary operator", p, id);
+            return;
+        }
+        out.push(' ');
+        push_text(out, op);
+        out.push(' ');
+        gen_expr(g, p, r, out);
+        out.push(')');
+        return;
+    }
+    if n.k == ast::Nk.Un {
+        let c = nth_child(p, id, 0);
+        if n.op == ast::Op.Neg { push_text(out, "(-"); }
+        else if n.op == ast::Op.Not { push_text(out, "(!"); }
+        else if n.op == ast::Op.BitNot { push_text(out, "(~"); }
+        else {
+            fail(g, "unsupported unary operator", p, id);
+            return;
+        }
+        gen_expr(g, p, c, out);
+        out.push(')');
+        return;
+    }
+    if n.k == ast::Nk.As {
+        let c = nth_child(p, id, 0);
+        let ty = nth_child(p, id, 1);
+        let ct = ctype_of(g, text_of(p, ty));
+        if ct == "" {
+            fail(g, "unsupported cast target", p, id);
+            return;
+        }
+        out.push('(');
+        push_text(out, ct);
+        push_text(out, ")(");
+        gen_expr(g, p, c, out);
+        out.push(')');
+        return;
+    }
+    if n.k == ast::Nk.Call {
+        let callee = nth_child(p, id, 0);
+        var cn .= p.nodes[callee];
+        if cn.k != ast::Nk.Name {
+            fail(g, "only plain function calls are supported yet", p, id);
+            return;
+        }
+        if cn.text == "print" {
+            fail(g, "print is a statement, not an expression", p, id);
+            return;
+        }
+        if lookup_ret(g, cn.text) == "" {
+            fail(g, "call of an unknown or unsupported function", p, id);
+            return;
+        }
+        push_text(out, cn.text);
+        out.push('(');
+        var c = cn.next;
+        var first = true;
+        while c >= 0 {
+            if !first { push_text(out, ", "); }
+            first = false;
+            if p.nodes[c].k == ast::Nk.Raw {
+                fail(g, "generic calls are not supported yet", p, id);
+                return;
+            }
+            gen_expr(g, p, c, out);
+            c = p.nodes[c].next;
+        }
+        out.push(')');
+        return;
+    }
+    fail(g, "unsupported expression form", p, id);
+}
+
+recursive fn gen_str_part(g: Gen&, p: ast::Parser&, id: i64, fmt: u8[>..]&) {
+    var buf: u8[>..] = [];
+    ast::str_content(p.nodes[id].text, buf);
+    c_fmt_text(buf, fmt);
+}
+
+fn is_str_call(p: ast::Parser&, id: i64) -> bool {
+    var cn .= p.nodes[id];
+    let callee = cn.first;
+    if callee < 0 { return false; }
+    var cc .= p.nodes[callee];
+    return cc.k == ast::Nk.Name && cc.text == "str";
+}
+
+recursive fn gen_print(g: Gen&, p: ast::Parser&, id: i64, depth: i64) {
+    var fmt: u8[>..] = [];
+    var vals: u8[>..] = [];
+    var c = nth_child(p, id, 1);
+    var first = true;
+    while c >= 0 {
+        var cn .= p.nodes[c];
+        if cn.k == ast::Nk.Str {
+            gen_str_part(g, p, c, fmt);
+        }
+        else if cn.k == ast::Nk.Call && is_str_call(p, c) {
+            let callee = cn.first;
+            var cc .= p.nodes[callee];
+            var inner = cc.next;
+            while inner >= 0 {
+                var in_n .= p.nodes[inner];
+                if in_n.k == ast::Nk.Str {
+                    gen_str_part(g, p, inner, fmt);
+                } else {
+                    let ty = expr_type(g, p, inner);
+                    if !g.ok { return; }
+                    if is_unsigned(ty) { push_text(fmt, "%llu"); }
+                    else { push_text(fmt, "%lld"); }
+                    if !first { push_text(vals, ", "); }
+                    first = false;
+                    gen_expr(g, p, inner, vals);
+                }
+                inner = p.nodes[inner].next;
+            }
+        }
+        else {
+            let ty = expr_type(g, p, c);
+            if !g.ok { return; }
+            if !is_int_type(ty) {
+                fail(g, "print supports strings, integers and bools only yet", p, id);
+                return;
+            }
+            if ty == "bool" {
+                push_text(fmt, "%s");
+                if !first { push_text(vals, ", "); }
+                first = false;
+                push_text(vals, "(");
+                gen_expr(g, p, c, vals);
+                push_text(vals, ") ? \"true\" : \"false\"");
+            }
+            else if is_unsigned(ty) { push_text(fmt, "%llu"); }
+            else { push_text(fmt, "%lld"); }
+            if ty != "bool" {
+                if !first { push_text(vals, ", "); }
+                first = false;
+                gen_expr(g, p, c, vals);
+            }
+        }
+        c = p.nodes[c].next;
+    }
+    emit_indent(g, depth);
+    emit(g, "printf(\"");
+    emit_buf(g, fmt);
+    emit(g, "\\n\"");
+    if vals.len > 0 {
+        emit(g, ", ");
+        emit_buf(g, vals);
+    }
+    emit(g, ");\n");
+}
+
+recursive fn let_type_of(g: Gen&, p: ast::Parser&, init: i64) -> const u8[:] {
+    var n .= p.nodes[init];
+    if n.k == ast::Nk.Int { return "long long"; }
+    if n.k == ast::Nk.As { return ctype_of(g, text_of(p, nth_child(p, init, 1))); }
+    if n.k == ast::Nk.Call {
+        let callee = nth_child(p, init, 0);
+        var cn .= p.nodes[callee];
+        if cn.k == ast::Nk.Name { return lookup_ret(g, cn.text); }
+        return "";
+    }
+    if n.k == ast::Nk.Name { return lookup_type(g, n.text); }
+    let ty = expr_type(g, p, init);
+    if !g.ok { return ""; }
+    if ty == "" { return "long long"; }
+    return ty;
+}
+
+fn emit_let(g: Gen&, p: ast::Parser&, depth: i64, name: const u8[:], ty: const u8[:], init: i64) {
+    var e: u8[>..] = [];
+    gen_expr(g, p, init, e);
+    if !g.ok { return; }
+    declare(g, name, ty);
+    emit_indent(g, depth);
+    push_text(g.out, ty);
+    emit(g, " ");
+    push_text(g.out, name);
+    emit(g, " = ");
+    emit_buf(g, e);
+    emit(g, ";\n");
+}
+
+recursive fn gen_stmt(g: Gen&, p: ast::Parser&, id: i64, tail: bool, depth: i64, rets: const u8[:]) {
+    guard g.ok else { return; }
+    var n .= p.nodes[id];
+    if n.k == ast::Nk.Let {
+        if n.val & 2 != 0 || n.val & 4 != 0 || n.val & 8 != 0 || n.val & 16 != 0 {
+            fail(g, "unsupported declaration form", p, id);
+            return;
+        }
+        if child_count(p, id) > 3 {
+            fail(g, "multiple names or values are not supported yet", p, id);
+            return;
+        }
+        let name = nth_child(p, id, 0);
+        if is_c_keyword(p.nodes[name].text) {
+            fail(g, "the name clashes with a C keyword", p, id);
+            return;
+        }
+        let cc = child_count(p, id);
+        if cc > 3 {
+            fail(g, "multiple names or values are not supported yet", p, id);
+            return;
+        }
+        if cc == 3 {
+            if p.nodes[nth_child(p, id, 1)].k != ast::Nk.Raw {
+                fail(g, "multiple names or values are not supported yet", p, id);
+                return;
+            }
+            let ty = ctype_of(g, p.nodes[nth_child(p, id, 1)].text);
+            if ty == "" {
+                fail(g, "unsupported variable type", p, id);
+                return;
+            }
+            emit_let(g, p, depth, p.nodes[name].text, ty, nth_child(p, id, 2));
+            return;
+        }
+        if cc == 2 && p.nodes[nth_child(p, id, 1)].k == ast::Nk.Raw {
+            let ty = ctype_of(g, p.nodes[nth_child(p, id, 1)].text);
+            if ty == "" {
+                fail(g, "unsupported variable type", p, id);
+                return;
+            }
+            declare(g, p.nodes[name].text, ty);
+            emit_indent(g, depth);
+            push_text(g.out, ty);
+            emit(g, " ");
+            push_text(g.out, p.nodes[name].text);
+            emit(g, " = 0;\n");
+            return;
+        }
+        let init = nth_child(p, id, 1);
+        let ty = let_type_of(g, p, init);
+        if !g.ok { return; }
+        if ty == "" {
+            fail(g, "cannot infer the variable type", p, id);
+            return;
+        }
+        emit_let(g, p, depth, p.nodes[name].text, ty, init);
+        return;
+    }
+    if n.k == ast::Nk.Assign {
+        let lval = nth_child(p, id, 0);
+        var ln .= p.nodes[lval];
+        if ln.k != ast::Nk.Name {
+            fail(g, "assignment to complex targets is not supported yet", p, id);
+            return;
+        }
+        let ty = lookup_type(g, ln.text);
+        if ty == "" {
+            fail(g, "unknown variable", p, id);
+            return;
+        }
+        var op: const u8[:] = "";
+        var inc = false;
+        if n.val == 1 && child_count(p, id) == 1 {
+            inc = true;
+            if n.op == ast::Op.SubA { op = "--"; } else { op = "++"; }
+        } else if n.op == ast::Op.Set { op = "="; }
+        else if n.op == ast::Op.AddA { op = "+="; }
+        else if n.op == ast::Op.SubA { op = "-="; }
+        else if n.op == ast::Op.MulA { op = "*="; }
+        else if n.op == ast::Op.DivA { op = "/="; }
+        else if n.op == ast::Op.ModA { op = "%="; }
+        else if n.op == ast::Op.BandA { op = "&="; }
+        else if n.op == ast::Op.BorA { op = "|="; }
+        else if n.op == ast::Op.XorA { op = "^="; }
+        else if n.op == ast::Op.ShlA { op = "<<="; }
+        else if n.op == ast::Op.ShrA { op = ">>="; }
+        else {
+            fail(g, "unsupported assignment operator", p, id);
+            return;
+        }
+        var e: u8[>..] = [];
+        if !inc {
+            let rhs = nth_child(p, id, 1);
+            gen_expr(g, p, rhs, e);
+            if !g.ok { return; }
+        }
+        emit_indent(g, depth);
+        push_text(g.out, ln.text);
+        emit(g, " ");
+        push_text(g.out, op);
+        if inc {
+            emit(g, ";\n");
+            return;
+        }
+        emit(g, " ");
+        emit_buf(g, e);
+        emit(g, ";\n");
+        return;
+    }
+    if n.k == ast::Nk.Expr {
+        let e = nth_child(p, id, 0);
+        var en .= p.nodes[e];
+        if en.k == ast::Nk.If || en.k == ast::Nk.While || en.k == ast::Nk.For
+            || en.k == ast::Nk.Block || en.k == ast::Nk.Match || en.k == ast::Nk.Loop
+            || en.k == ast::Nk.Let || en.k == ast::Nk.Assign || en.k == ast::Nk.Return
+            || en.k == ast::Nk.Break || en.k == ast::Nk.Continue || en.k == ast::Nk.Defer {
+            gen_stmt(g, p, e, (n.val & 1) != 0, depth, rets);
+            return;
+        }
+        if en.k == ast::Nk.Call {
+            let callee = en.first;
+            var cc .= p.nodes[callee];
+            if cc.k == ast::Nk.Name && cc.text == "print" {
+                gen_print(g, p, e, depth);
+                return;
+            }
+        }
+        var buf: u8[>..] = [];
+        gen_expr(g, p, e, buf);
+        if !g.ok { return; }
+        emit_indent(g, depth);
+        if tail && rets != "" && rets != "void" {
+            emit(g, "return ");
+            emit_buf(g, buf);
+            emit(g, ";\n");
+            return;
+        }
+        emit_buf(g, buf);
+        emit(g, ";\n");
+        return;
+    }
+    if n.k == ast::Nk.If {
+        let cond = nth_child(p, id, 0);
+        let then = nth_child(p, id, 1);
+        let els = nth_child(p, id, 2);
+        emit_indent(g, depth);
+        emit(g, "if (");
+        {
+            var buf: u8[>..] = [];
+            gen_expr(g, p, cond, buf);
+            if !g.ok { return; }
+            emit_buf(g, buf);
+        }
+        emit(g, ") {\n");
+        let branch_tail = tail && rets != "" && rets != "void";
+        gen_block(g, p, then, depth + 1, rets, branch_tail);
+        if !g.ok { return; }
+        if els >= 0 {
+            var en .= p.nodes[els];
+            if en.k == ast::Nk.If {
+                emit_indent(g, depth);
+                emit(g, "} else ");
+                gen_stmt(g, p, els, tail, depth, rets);
+                return;
+            }
+            emit_indent(g, depth);
+            emit(g, "} else {\n");
+            gen_block(g, p, els, depth + 1, rets, branch_tail);
+            if !g.ok { return; }
+        }
+        emit_indent(g, depth);
+        emit(g, "}\n");
+        return;
+    }
+    if n.k == ast::Nk.While {
+        let cond = nth_child(p, id, 0);
+        let body = nth_child(p, id, 1);
+        emit_indent(g, depth);
+        emit(g, "while (");
+        {
+            var buf: u8[>..] = [];
+            gen_expr(g, p, cond, buf);
+            if !g.ok { return; }
+            emit_buf(g, buf);
+        }
+        emit(g, ") {\n");
+        gen_block(g, p, body, depth + 1, rets, false);
+        if !g.ok { return; }
+        emit_indent(g, depth);
+        emit(g, "}\n");
+        return;
+    }
+    if n.k == ast::Nk.For {
+        let name = nth_child(p, id, 0);
+        let seq = nth_child(p, id, 1);
+        let body = nth_child(p, id, 2);
+        var sn .= p.nodes[seq];
+        var lo: i64 = -1;
+        var hi: i64 = -1;
+        if sn.k == ast::Nk.Range {
+            lo = nth_child(p, seq, 0);
+            hi = nth_child(p, seq, 1);
+        }
+        if hi < 0 {
+            fail(g, "for over slices and arrays is not supported yet", p, id);
+            return;
+        }
+        var names .= p.nodes[name];
+        if is_c_keyword(names.text) {
+            fail(g, "the loop name clashes with a C keyword", p, id);
+            return;
+        }
+        g.tmp++;
+        declare(g, names.text, "long long");
+        emit_indent(g, depth);
+        {
+            var endname: u8[>..] = [];
+            format(endname, "__cgen_end_", g.tmp);
+            emit(g, "for (long long ");
+            push_text(g.out, names.text);
+            emit(g, " = ");
+            {
+                var lbuf: u8[>..] = [];
+                gen_expr(g, p, lo, lbuf);
+                if !g.ok { return; }
+                emit_buf(g, lbuf);
+            }
+            emit(g, ", ");
+            emit_buf(g, endname);
+            emit(g, " = ");
+            {
+                var hbuf: u8[>..] = [];
+                gen_expr(g, p, hi, hbuf);
+                if !g.ok { return; }
+                emit_buf(g, hbuf);
+            }
+            emit(g, "; ");
+            push_text(g.out, names.text);
+            emit(g, " < ");
+            emit_buf(g, endname);
+            emit(g, "; ");
+            push_text(g.out, names.text);
+            emit(g, "++) {\n");
+        }
+        {
+            gen_block(g, p, body, depth + 1, rets, false);
+            if !g.ok { return; }
+        }
+        emit_indent(g, depth);
+        emit(g, "}\n");
+        return;
+    }
+    if n.k == ast::Nk.Return {
+        let vals = child_count(p, id);
+        if vals > 1 {
+            fail(g, "multiple return values are not supported yet", p, id);
+            return;
+        }
+        emit_indent(g, depth);
+        if vals == 0 {
+            emit(g, "return;\n");
+            return;
+        }
+        let v = nth_child(p, id, 0);
+        var buf: u8[>..] = [];
+        gen_expr(g, p, v, buf);
+        if !g.ok { return; }
+        emit(g, "return ");
+        emit_buf(g, buf);
+        emit(g, ";\n");
+        return;
+    }
+    if n.k == ast::Nk.Break {
+        if child_count(p, id) > 0 {
+            fail(g, "break with a value is not supported yet", p, id);
+            return;
+        }
+        emit_indent(g, depth);
+        emit(g, "break;\n");
+        return;
+    }
+    if n.k == ast::Nk.Continue {
+        emit_indent(g, depth);
+        emit(g, "continue;\n");
+        return;
+    }
+    fail(g, "unsupported statement form", p, id);
+}
+
+recursive fn gen_block(g: Gen&, p: ast::Parser&, id: i64, depth: i64, rets: const u8[:], force: bool) {
+    guard g.ok else { return; }
+    var c = first_child(p, id);
+    var last = p.nodes[id].last;
+    while c >= 0 {
+        let tail = c == last && ((p.nodes[c].val & 1) != 0 || force);
+        gen_stmt(g, p, c, tail, depth, rets);
+        if !g.ok { return; }
+        c = p.nodes[c].next;
+    }
+}
+
+fn fn_ret_type(g: Gen&, p: ast::Parser&, id: i64) -> const u8[:] {
+    var n .= p.nodes[id];
+    let body = n.last;
+    if body < 0 || p.nodes[body].k != ast::Nk.Block {
+        fail(g, "extern and declared-only functions are not supported yet", p, id);
+        return "";
+    }
+    var c = n.first;
+    var seen_param = false;
+    var has_rets = false;
+    var rets: const u8[:] = "void";
+    while c >= 0 && c != body {
+        var cn .= p.nodes[c];
+        if cn.k == ast::Nk.Param { seen_param = true; }
+        else if cn.k == ast::Nk.Raw {
+            if !seen_param {
+                fail(g, "generic functions are not supported yet", p, id);
+                return "";
+            }
+            rets = ctype_of(g, cn.text);
+            has_rets = true;
+        }
+        c = cn.next;
+    }
+    if has_rets && rets == "" {
+        fail(g, "unsupported return type", p, id);
+        return "";
+    }
+    return rets;
+}
+
+fn check_fn_head(g: Gen&, p: ast::Parser&, id: i64) -> bool {
+    var n .= p.nodes[id];
+    if n.val & 1 != 0 || n.val & 2 != 0 || n.val & 4 != 0 || n.val & 8 != 0
+        || n.val & 16 != 0 || n.val & 32 != 0 || n.val & 64 != 0 {
+        fail(g, "function qualifiers are not supported yet", p, id);
+        return false;
+    }
+    guard fn_ret_type(g, p, id) != "" else { return false; }
+    if is_c_keyword(n.text) {
+        fail(g, "the function name clashes with a C keyword", p, id);
+        return false;
+    }
+    var c = n.first;
+    let body = n.last;
+    while c >= 0 && c != body {
+        var cn .= p.nodes[c];
+        if cn.k == ast::Nk.Param {
+            if cn.val & 1 != 0 {
+                fail(g, "var parameters are not supported yet", p, id);
+                return false;
+            }
+            if child_count(p, c) > 1 {
+                fail(g, "parameter defaults are not supported yet", p, id);
+                return false;
+            }
+            let pty = nth_child(p, c, 0);
+            var pt: const u8[:] = "long long";
+            if pty >= 0 { pt = ctype_of(g, text_of(p, pty)); }
+            if pt == "" {
+                fail(g, "unsupported parameter type", p, id);
+                return false;
+            }
+            if is_c_keyword(cn.text) {
+                fail(g, "the parameter name clashes with a C keyword", p, id);
+                return false;
+            }
+        }
+        c = cn.next;
+    }
+    return true;
+}
+
+recursive fn gen_fn(g: Gen&, p: ast::Parser&, id: i64) {
+    guard g.ok else { return; }
+    var n .= p.nodes[id];
+    guard check_fn_head(g, p, id) else { return; }
+    let rets = fn_ret_type(g, p, id);
+    guard g.ok else { return; }
+    let body = n.last;
+    if n.text == "main" {
+        emit(g, "int main(void) {\n");
+    } else {
+        emit(g, "static ");
+        push_text(g.out, rets);
+        emit(g, " ");
+        push_text(g.out, n.text);
+        emit(g, "(");
+        var c2 = n.first;
+        var pi: i64 = 0;
+        while c2 >= 0 && c2 != body {
+            var cn2 .= p.nodes[c2];
+            if cn2.k == ast::Nk.Param {
+                if pi > 0 { emit(g, ", "); }
+                let pty = nth_child(p, c2, 0);
+                var pt: const u8[:] = "long long";
+                if pty >= 0 { pt = ctype_of(g, text_of(p, pty)); }
+                push_text(g.out, pt);
+                emit(g, " ");
+                push_text(g.out, p.nodes[c2].text);
+                declare(g, p.nodes[c2].text, pt);
+                pi++;
+            }
+            c2 = cn2.next;
+        }
+        emit(g, ") {\n");
+    }
+    gen_block(g, p, body, 1, rets, false);
+    if !g.ok { return; }
+    if n.text == "main" {
+        emit_indent(g, 1);
+        emit(g, "return 0;\n");
+    }
+    emit(g, "}\n\n");
+}
+
+recursive fn gen(g: Gen&, p: ast::Parser&, root: i64) {
+    var c = first_child(p, root);
+    var count: i64 = 0;
+    while c >= 0 {
+        var cn .= p.nodes[c];
+        if cn.k != ast::Nk.Fn {
+            fail(g, "only functions are supported at top level yet", p, c);
+            return;
+        }
+        guard check_fn_head(g, p, c) else { return; }
+        let rets = fn_ret_type(g, p, c);
+        guard g.ok else { return; }
+        g.fns.push(p.nodes[c].text);
+        g.frets.push(rets);
+        c = cn.next;
+        count++;
+    }
+    if count == 0 {
+        g.ok = false;
+        g.msg = "the program has no functions";
+        return;
+    }
+    emit(g, "#include <stdio.h>\n#include <stdbool.h>\n\n");
+    c = first_child(p, root);
+    while c >= 0 {
+        var cn .= p.nodes[c];
+        let rets = fn_ret_type(g, p, c);
+        guard g.ok else { return; }
+        if p.nodes[c].text == "main" {
+            emit(g, "int main(void);\n");
+        } else {
+            emit(g, "static ");
+            push_text(g.out, rets);
+            emit(g, " ");
+            push_text(g.out, p.nodes[c].text);
+            emit(g, "(");
+            var c2 = p.nodes[c].first;
+            let body = p.nodes[c].last;
+            var pi: i64 = 0;
+            while c2 >= 0 && c2 != body {
+                var cn2 .= p.nodes[c2];
+                if cn2.k == ast::Nk.Param {
+                    if pi > 0 { emit(g, ", "); }
+                    let pty = nth_child(p, c2, 0);
+                    var pt: const u8[:] = "long long";
+                    if pty >= 0 { pt = ctype_of(g, text_of(p, pty)); }
+                    push_text(g.out, pt);
+                    emit(g, " ");
+                    push_text(g.out, p.nodes[c2].text);
+                    pi++;
+                }
+                c2 = cn2.next;
+            }
+            emit(g, ");\n");
+        }
+        c = cn.next;
+    }
+    emit(g, "\n");
+    c = first_child(p, root);
+    while c >= 0 {
+        var cn .= p.nodes[c];
+        for i in g.names.len { g.names.pop(); g.types.pop(); }
+        gen_fn(g, p, c);
+        if !g.ok { return; }
+        c = cn.next;
+    }
+}

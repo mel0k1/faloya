@@ -1,0 +1,31 @@
+fn is_prime(n: i64) -> bool {
+    if n < 2 { return false; }
+    var d: i64 = 2;
+    while d * d <= n {
+        if n % d == 0 { return false; }
+        d += 1;
+    }
+    true
+}
+
+fn nth_prime(want: i64) -> i64 {
+    var found: i64 = 0;
+    var cand: i64 = 1;
+    while found < want {
+        cand += 1;
+        if is_prime(cand) { found += 1; }
+    }
+    cand
+}
+
+fn main() {
+    print("primes 10..15:");
+    for i in 10..16 {
+        print("  #", i, " = ", nth_prime(i));
+    }
+    var count = 0;
+    for n in 2..50 {
+        if is_prime(n) { count += 1; }
+    }
+    print("primes below 50: ", count);
+}
