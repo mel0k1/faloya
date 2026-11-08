@@ -1370,9 +1370,12 @@ bindings), `guard` with and without `else`, `return` with several values and
 definitions, and `match` as a statement and as an expression, with variant,
 binding, literal and range patterns.
 
-The trial keeps whole interpolating strings as one token rather than a tree,
-and does not cover `const for`/`const if` expansion or function values
-(`fn(...) { ... }` in an expression).
+Interpolation parses into the same `str(...)` call the compiler builds: the
+string splits into text parts and expressions, and nested interpolations
+become nested calls. `guard` expands into an `if` over a block holding the
+rest of the statements, `x |> f(y)` becomes `f(x, y)`, and closures in a
+call's trailing block become `closure` nodes with parameters. `const
+for`/`const if` expansion is not covered yet.
 
 ### Nodes and the dump
 
@@ -3025,3 +3028,45 @@ frame of input to the context, in order:
 `render` and `input_from_gfx` both work in the screen's pixels, so on a
 high-density display the ui has as many pixels as elsewhere, and so looks
 smaller, until the program sets a scale.
+
+
+### Comparing trees against the compiler
+
+This package's tree is compared against the tree the C++ compiler builds.
+`faloya --tree file.fal` prints a canonical dump of the parse in the same
+node model: the same kind names, the same flags, types as compacted source
+spans. `scripts/tree_diff.py` runs both sides over the corpus of
+`test/cases`, `samples` and `stdlib` and prints the differences; the trees
+currently match on the whole corpus. After edits, two commands keep it that
+way:
+
+```bash
+faloya build test/cgen/drv.fal -o build/astdump
+python3 scripts/tree_diff.py
+```
+
+### cgen: the C generator
+
+The second step of the self-hosting plan: `stdlib/cgen` turns the `ast`
+package's tree into C text. The first slice covers integer types and `bool`,
+literals, arithmetic with every operator through parenthesization, `let` and
+`var` with type inference, compound assignments and `++`, `if`/`else
+if`/`else`, `while`, `for` over a range with its bound evaluated once,
+`return`, `break`, `continue`, calls to the program's own functions, and
+printing through `printf` (strings, integers and `bool`, including
+`${...}` parts). Everything else is rejected with a message and a line
+number.
+
+```goose
+import ast;
+import cgen;
+
+var p: ast::Parser = ast::Parser { .. };
+let root = ast::parse(src, p);
+var g: cgen::Gen = cgen::Gen { .. };
+cgen::gen(g, p, root);          // g.out: u8[>..] holding the C text
+```
+
+The driver `test/cgen/drv.fal` reads a file and prints the C, and
+`test/cgen/run.py` generates, compiles with the system `cc` and compares
+against `faloya run` for every case in `test/cgen/*.fal`.
