@@ -1275,6 +1275,56 @@ let version, version_ok = binary::read_u16le(out, 4);
 assert(version_ok && version == 3);
 ```
 
+### Patching, padding and windows
+
+```goose
+fn write_bytes(out: u8[>..]&, data: const u8[:])             // appends a whole slice
+fn zeros(out: u8[>..]&, size: i64)                           // appends size zero bytes
+fn align(out: u8[>..]&, to: i64) -> i64                      // pads to a multiple of `to`, returns the new length
+fn reserve(out: u8[>..]&, size: i64) -> i64                  // appends size zero bytes, returns the offset to patch later
+fn patch(out: u8[>..]&, at: i64, data: const u8[:]) -> bool  // copies data over existing bytes
+fn patch_u8(out: u8[>..]&, at: i64, v: u8) -> bool           // and patch_i8
+fn patch_u16le(out: u8[>..]&, at: i64, v: u16) -> bool       // every other read width too, le and be
+fn patch_f64be(out: u8[>..]&, at: i64, v: f64) -> bool
+fn window(out: u8[>..]&, at: i64, size: i64) -> u8[:], bool  // a mutable view into the buffer
+fn left(r: Reader) -> i64                                    // bytes still unread
+fn done(r: Reader) -> bool                                   // pos reached the end
+fn remaining(r: Reader&) -> const u8[:]                      // a view of the unread tail
+```
+
+Writes append; `patch_*` rewrites bytes that are already in the buffer,
+without changing its length, at an absolute offset. That is how a writer
+backpatches a length or a jump target it only learns later. Every patch
+checks its range against `out.len` with the same overflow-safe rule the
+offset reads use, returns `false` on a negative or out-of-range offset and
+leaves the buffer alone, and returns `true` on success. An empty patch at
+the end is valid. A float patch keeps the value's bits exactly.
+
+`window` hands out a mutable view straight into the buffer's storage: writes
+through it land in `out` itself, nothing is copied (a grow-only array's
+elements never move). The view covers the bytes that existed when it was
+taken and does not follow later pushes. `reserve` plus `patch` is the usual
+pair for a field whose value is only known after more data is written.
+
+`left`, `done` and `remaining` read a cursor's position: how many bytes are
+still unread, whether the cursor reached the end, and a view of the unread
+tail that borrows the cursor's input. `remaining` does not advance `pos`.
+
+```goose
+var out: u8[>..] = [];
+let size_at = binary::reserve(out, 2);       // a length field, filled in later
+binary::write_bytes(out, "hello");
+binary::write_bytes(out, "world");
+let size = out.len - 2;
+binary::patch_u16le(out, size_at, size as u16);
+binary::align(out, 4);
+let w, w_ok = binary::window(out, 2, 5);
+w[0] = 'H';                                  // "Hello" in place, no copy
+var r = binary::reader(out);
+binary::skip(r, 2);                          // past the length field
+let payload, ok = binary::read_bytes(r, binary::left(r));
+```
+
 ## base64
 
 Base64 as RFC 4648 §4 defines it: the standard alphabet (`A`-`Z`, `a`-`z`,
