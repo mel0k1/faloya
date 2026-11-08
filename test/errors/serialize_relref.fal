@@ -1,0 +1,7 @@
+struct Link { next: Link&<u32>?, v: i32 }
+
+fn main() {
+    var img: u8[>..] = [];
+    var back, ok = from_bytes<Link[>..<]>(img);
+    print(back.len, " ", ok);
+}

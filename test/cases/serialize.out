@@ -1,0 +1,10 @@
+image: 41 bytes for 5 points
+roundtrip: true same: true
+view: 40 bytes, matches image body: true
+appended twice: true
+first of two: true true
+two frames as one: false
+lines: true true true true true
+empty: true 0
+tampered: false false false
+body alone rejected: true 0

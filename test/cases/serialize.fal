@@ -1,0 +1,60 @@
+struct Point { x: i32, y: i32 }
+struct Line { a: Point, b: Point, tag: u8[..8] }
+
+fn same_points(xs: Point[:], ys: Point[:]) -> bool {
+    if xs.len != ys.len { return false; }
+    for i in xs.len { if xs[i].x != ys[i].x || xs[i].y != ys[i].y { return false; } }
+    return true;
+}
+
+fn main() {
+    var points: Point[>..] = [];
+    for i in 5 { points.push(Point { x: i as i32 * 3, y: -i as i32 }); }
+    var image: u8[>..] = points.to_bytes();
+    print("image: ${image.len} bytes for ${points.len} points");
+
+    var back, ok = from_bytes<Point[>..]>(image);
+    print("roundtrip: ${ok} same: ${same_points(back, points)}");
+
+    let view = points.bytes_of();
+    print("view: ${view.len} bytes, matches image body: ${view.len == image.len - 3 || view.len == image.len - 2 || view.len == image.len - 1}");
+
+    var sink: u8[>..] = [];
+    points.to_bytes(sink);
+    points.to_bytes(sink);
+    print("appended twice: ${sink.len == image.len * 2}");
+    var twice, tok = from_bytes<Point[>..]>(sink[..image.len]);
+    print("first of two: ${tok} ${same_points(twice, points)}");
+    var both, bok = from_bytes<Point[>..]>(sink);
+    print("two frames as one: ${bok}");
+
+    var lines: Line[>..] = [];
+    lines.push(Line { a: Point { x: 1, y: 2 }, b: Point { x: 3, y: 4 }, tag: "edge" });
+    lines.push(Line { a: Point { x: 5, y: 6 }, b: Point { x: 7, y: 8 }, tag: "edge" });
+    var limage: u8[>..] = lines.to_bytes();
+    var lback, lok = from_bytes<Line[>..]>(limage);
+    print("lines: ${lok} ${lback.len == 2} ${lback[0].a.x == 1} ${lback[1].b.y == 8} ${lback[0].tag == "edge"}");
+
+    var empty: Point[>..] = [];
+    var eimage: u8[>..] = empty.to_bytes();
+    var eback, eok = from_bytes<Point[>..]>(eimage);
+    print("empty: ${eok} ${eback.len}");
+
+    var cut: u8[>..] = [];
+    cut.append(image);
+    cut.pop();
+    var cback, cok = from_bytes<Point[>..]>(cut);
+    var grown: u8[>..] = [];
+    grown.append(image);
+    grown.push(0);
+    var gback, gok = from_bytes<Point[>..]>(grown);
+    var junk: u8[>..] = [];
+    junk.append("garbage bytes!!!");
+    var jback, jok = from_bytes<Point[>..]>(junk);
+    print("tampered: ${cok} ${gok} ${jok}");
+
+    var flat: u8[>..] = [];
+    flat.append(view);
+    var fback, fok = from_bytes<Point[>..]>(flat);
+    print("body alone rejected: ${!fok} ${fback.len}");
+}
