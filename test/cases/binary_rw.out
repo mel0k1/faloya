@@ -1,0 +1,20 @@
+len: 24
+u64le: true true
+u16be: true true
+f64le: true true
+bytes: bytes true
+i8: -3 true
+reserve: 24
+patch: true
+patched: true true
+align: 40 0
+window: 4 true true
+patch slice: true true
+window out of range: 0 false
+patch out of range: false false
+patch empty: true
+window empty at end: 0 true
+reader: 40 false
+read u8: true true
+remaining: 19 false
+done: true 0

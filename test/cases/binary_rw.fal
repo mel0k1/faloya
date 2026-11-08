@@ -1,0 +1,56 @@
+import binary;
+
+fn main() {
+    var out: u8[>..] = [];
+    binary::write_u64le(out, 0x0102030405060708);
+    binary::write_u16be(out, 0xABCD);
+    binary::write_f64le(out, 1.5);
+    binary::write_bytes(out, "bytes");
+    binary::write_i8(out, -3);
+    print("len: ${out.len}");
+
+    let v, vok = binary::read_u64le(out, 0);
+    print("u64le: ${v == 0x0102030405060708} ${vok}");
+    let w, wok = binary::read_u16be(out, 8);
+    print("u16be: ${w == 0xABCD} ${wok}");
+    let f, fok = binary::read_f64le(out, 10);
+    print("f64le: ${f == 1.5} ${fok}");
+    let b, bok = binary::read_bytes(out, 18, 5);
+    print("bytes: ${b} ${bok}");
+    let n, nok = binary::read_i8(out, 23);
+    print("i8: ${n} ${nok}");
+
+    let at = binary::reserve(out, 4);
+    binary::write_i64le(out, -2);
+    print("reserve: ${at}");
+    print("patch: ${binary::patch_u32le(out, at, 0xDEADBEEF)}");
+    let p, pok = binary::read_u32le(out, at);
+    print("patched: ${p == 0xDEADBEEF} ${pok}");
+
+    let aligned = binary::align(out, 8);
+    print("align: ${aligned} ${out.len % 8}");
+
+    let win, winok = binary::window(out, 0, 4);
+    win[0] = 0xFF;
+    print("window: ${win.len} ${winok} ${out[0] == 0xFF}");
+    binary::patch(out, 8, "XY");
+    let xy, xyok = binary::read_u16be(out, 8);
+    print("patch slice: ${xy == 0x5859} ${xyok}");
+
+    let far, farok = binary::window(out, out.len, 1);
+    print("window out of range: ${far.len} ${farok}");
+    print("patch out of range: ${binary::patch_u8(out, out.len, 1)} ${binary::patch_u8(out, -1, 1)}");
+    print("patch empty: ${binary::patch(out, out.len, "")}");
+    let empty, eok = binary::window(out, out.len, 0);
+    print("window empty at end: ${empty.len} ${eok}");
+
+    var r = binary::reader(out);
+    print("reader: ${binary::left(r)} ${binary::done(r)}");
+    let h, hok = binary::read_u8(r);
+    print("read u8: ${h == 0xFF} ${hok}");
+    binary::skip(r, 20);
+    let rem = binary::remaining(r);
+    print("remaining: ${rem.len} ${binary::done(r)}");
+    binary::skip(r, rem.len);
+    print("done: ${binary::done(r)} ${binary::left(r)}");
+}

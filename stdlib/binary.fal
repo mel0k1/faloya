@@ -256,3 +256,117 @@ fn write_u64be(out: u8[>..]&, v: u64) {
 fn write_i64be(out: u8[>..]&, v: i64) { write_u64be(out, v as! u64); }
 fn write_f32be(out: u8[>..]&, v: f32) { write_u32be(out, bits_of_f32(v)); }
 fn write_f64be(out: u8[>..]&, v: f64) { write_u64be(out, bits_of_f64(v)); }
+
+fn write_bytes(out: u8[>..]&, data: const u8[:]) { out.append(data); }
+
+fn zeros(out: u8[>..]&, size: i64) {
+    if size <= 0 { return; }
+    for i in size { out.push(0); }
+}
+
+fn align(out: u8[>..]&, to: i64) -> i64 {
+    if to < 2 { return out.len; }
+    zeros(out, (to - out.len % to) % to);
+    return out.len;
+}
+
+fn reserve(out: u8[>..]&, size: i64) -> i64 {
+    let at = out.len;
+    zeros(out, size);
+    return at;
+}
+
+fn window(out: u8[>..]&, at: i64, size: i64) -> u8[:], bool {
+    if !range_ok(out[..], at, size) { return out[..0], false; }
+    return out[at..at + size], true;
+}
+
+fn patch(out: u8[>..]&, at: i64, data: const u8[:]) -> bool {
+    if !range_ok(out[..], at, data.len) { return false; }
+    for i in data.len { out[at + i] = data[i]; }
+    return true;
+}
+
+fn patch_u8(out: u8[>..]&, at: i64, v: u8) -> bool {
+    if !range_ok(out[..], at, 1) { return false; }
+    out[at] = v;
+    return true;
+}
+
+fn patch_i8(out: u8[>..]&, at: i64, v: i8) -> bool { patch_u8(out, at, v as! u8) }
+
+fn patch_u16le(out: u8[>..]&, at: i64, v: u16) -> bool {
+    if !range_ok(out[..], at, 2) { return false; }
+    out[at] = v as! u8;
+    out[at + 1] = (v >> 8) as! u8;
+    return true;
+}
+
+fn patch_i16le(out: u8[>..]&, at: i64, v: i16) -> bool { patch_u16le(out, at, v as! u16) }
+
+fn patch_u32le(out: u8[>..]&, at: i64, v: u32) -> bool {
+    if !range_ok(out[..], at, 4) { return false; }
+    out[at] = v as! u8;
+    out[at + 1] = (v >> 8) as! u8;
+    out[at + 2] = (v >> 16) as! u8;
+    out[at + 3] = (v >> 24) as! u8;
+    return true;
+}
+
+fn patch_i32le(out: u8[>..]&, at: i64, v: i32) -> bool { patch_u32le(out, at, v as! u32) }
+
+fn patch_u64le(out: u8[>..]&, at: i64, v: u64) -> bool {
+    if !range_ok(out[..], at, 8) { return false; }
+    patch_u32le(out, at, v as! u32);
+    patch_u32le(out, at + 4, (v >> 32) as! u32);
+    return true;
+}
+
+fn patch_i64le(out: u8[>..]&, at: i64, v: i64) -> bool { patch_u64le(out, at, v as! u64) }
+
+fn patch_f32le(out: u8[>..]&, at: i64, v: f32) -> bool { patch_u32le(out, at, bits_of_f32(v)) }
+fn patch_f64le(out: u8[>..]&, at: i64, v: f64) -> bool { patch_u64le(out, at, bits_of_f64(v)) }
+
+fn patch_u16be(out: u8[>..]&, at: i64, v: u16) -> bool {
+    if !range_ok(out[..], at, 2) { return false; }
+    out[at] = (v >> 8) as! u8;
+    out[at + 1] = v as! u8;
+    return true;
+}
+
+fn patch_i16be(out: u8[>..]&, at: i64, v: i16) -> bool { patch_u16be(out, at, v as! u16) }
+
+fn patch_u32be(out: u8[>..]&, at: i64, v: u32) -> bool {
+    if !range_ok(out[..], at, 4) { return false; }
+    out[at] = (v >> 24) as! u8;
+    out[at + 1] = (v >> 16) as! u8;
+    out[at + 2] = (v >> 8) as! u8;
+    out[at + 3] = v as! u8;
+    return true;
+}
+
+fn patch_i32be(out: u8[>..]&, at: i64, v: i32) -> bool { patch_u32be(out, at, v as! u32) }
+
+fn patch_u64be(out: u8[>..]&, at: i64, v: u64) -> bool {
+    if !range_ok(out[..], at, 8) { return false; }
+    patch_u32be(out, at, (v >> 32) as! u32);
+    patch_u32be(out, at + 4, v as! u32);
+    return true;
+}
+
+fn patch_i64be(out: u8[>..]&, at: i64, v: i64) -> bool { patch_u64be(out, at, v as! u64) }
+
+fn patch_f32be(out: u8[>..]&, at: i64, v: f32) -> bool { patch_u32be(out, at, bits_of_f32(v)) }
+fn patch_f64be(out: u8[>..]&, at: i64, v: f64) -> bool { patch_u64be(out, at, bits_of_f64(v)) }
+
+fn left(r: Reader) -> i64 {
+    if r.pos >= r.data.len { return 0; }
+    return r.data.len - r.pos;
+}
+
+fn done(r: Reader) -> bool { r.pos >= r.data.len }
+
+fn remaining(r: Reader&) -> const u8[:] {
+    if r.pos < 0 || r.pos > r.data.len { return r.data[..0]; }
+    return r.data[r.pos..];
+}
