@@ -1494,6 +1494,24 @@ struct Parser {
         auto l = ParseUnary();
         for (;;) {
             if (stmt_ended) return l;  
+            if (minprec <= 1 && lex.tok == T_PIPE) {
+                auto line = CurLine();
+                lex.Next();
+                Node *r;
+                {
+                    auto sub = Sub(no_struct_lit);
+                    r = ParseUnary();
+                }
+                if (auto c = Is<Call>(r)) {
+                    c->args.insert(c->args.begin(), l);
+                    l = r;
+                } else {
+                    auto call = New<Call>(line, r);
+                    call->args.push_back(l);
+                    l = Finish(call);
+                }
+                continue;
+            }
             auto prec = BinPrec(lex.tok);
             if (prec < minprec || !prec) return l;
             auto op = lex.tok;

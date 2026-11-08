@@ -1,0 +1,15 @@
+fn double(n: int) -> int { return n * 2; }
+fn sq(n: int) -> int { return n * n; }
+fn add(n: int, m: int) -> int { return n + m; }
+
+fn main() {
+    print(5 |> double());
+    print(5 |> double() |> sq());
+    print(9 |> sq() |> double());
+    print(2 |> double() |> add(10) |> double());
+    print(1 + 2 |> double());
+    print([1, 2, 3, 4].len |> double());
+    print("итог: ${10 |> double() |> sq()}");
+    42 |> print();
+    print(6 | 3);
+}

@@ -30,7 +30,7 @@ namespace faloya {
     F(T_NOT,      "!")   F(T_BITNOT,   "~") \
     F(T_BITAND,   "&")   F(T_BITOR,    "|")  F(T_XOR,   "^") \
     F(T_ANDAND,   "&&")  F(T_OROR,     "||") \
-    F(T_ARROW,    "->")  F(T_FATARROW, "=>")
+    F(T_ARROW,    "->")  F(T_FATARROW, "=>")  F(T_PIPE,  "|>")
 
 #define TOKENS_KEYWORDS \
     F(T_IMPORT,   "import")    F(T_NAMESPACE, "namespace") \
@@ -332,6 +332,7 @@ struct Lexer {
                 return;
             case '|':
                 if (*p == '|') { p++; Set(T_OROR); }
+                else if (*p == '>') { p++; Set(T_PIPE); }
                 else if (*p == '=') { p++; Set(T_OREQ); }
                 else Set(T_BITOR);
                 return;

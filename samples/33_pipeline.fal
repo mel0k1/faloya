@@ -1,0 +1,31 @@
+import std;
+
+
+
+fn twice(x) { x + x }
+
+
+
+fn inc(x) { x + 1 }
+
+
+
+fn bounded(n: i64, lim: i64) -> i64 { if n > lim { lim } else { n } }
+
+
+
+fn describe(x: i64) -> u8[>..] { str("n = ", x) }
+
+
+
+fn main() {
+    print(10 |> twice());
+    print(10 |> twice() |> inc());
+    print(3 |> twice() |> twice() |> twice());
+    print(99 |> bounded(50) |> inc());
+    print([4, 8, 15].len |> twice());
+    let v = [1, 2, 3, 4, 5];
+    print(v.len |> twice());
+    print(7 |> inc() |> describe());
+    print(str("sum: ", 1 + 2 |> twice()));
+}
