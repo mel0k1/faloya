@@ -303,6 +303,8 @@ struct TypeIndex : TypeDetail {
 struct TypeExpr {
     TypeKind kind;
     Line line;
+    const char *srcbegin = nullptr;
+    const char *srcend = nullptr;
     
     
     

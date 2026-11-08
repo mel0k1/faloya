@@ -7,6 +7,7 @@
 #include "lexer.h"
 #include "ast.h"
 #include "dump.h"
+#include "tree_dump.h"
 #include "clone.h"
 #include "parser.h"
 #include "resolve.h"
@@ -911,6 +912,7 @@ Options for looking into what the compiler does, and for its test suite.
 
 Options:
   --tokens              Print the file's tokens.
+  --tree                Print the parse tree in the stdlib/ast node model.
   --parse               Stop after parsing.
   --check               Stop after typechecking, as faloya check does.
   --dump                Print the parsed program back as source.
@@ -1367,6 +1369,7 @@ int Main(int argc, char **argv) {
     if (verb == "format") return RunFormat(vector<string>(argv + firstarg, argv + argc));
     string outname, headername, stdlibdir, shaderfile, shadersource, dumpfile;
     auto dump = false, dumpdocs = false, tokens = false, parseonly = false, specs = false;
+    auto treedump = false;
     auto nocgen = false;
     auto roundtrip = false, multitest = false;
     auto nobce = false, bcetest = false, bcelines = false, norfcheck = false;
@@ -1389,6 +1392,7 @@ int Main(int argc, char **argv) {
         }
         if (arg == "--dump") dump = true;
         else if (arg == "--tokens") tokens = true;
+        else if (arg == "--tree") treedump = true;
         else if (arg == "--parse") parseonly = true;
         else if (arg == "--roundtrip") roundtrip = true;
         else if (arg == "--dump-file" && i + 1 < argc) dumpfile = argv[++i];
@@ -1598,6 +1602,20 @@ int Main(int argc, char **argv) {
     
     vector<Diagnostic> found;
     auto compile = [&]() -> int {
+        if (treedump) {
+            string contents;
+            if (!LoadSource(filename, contents))
+                throw CompileError { cat("cannot open file: ", filename) };
+            astp = make_unique<Ast>();
+            astp->sources.emplace_back(filename, make_unique<string>(std::move(contents)));
+            Parser parser(*astp, filename, astp->sources[0].second->c_str(), 0);
+            parser.ParseTop();
+            if (!astp->errors.empty()) return 1;
+            string s;
+            TreeDump(*astp, s);
+            fputs(s.c_str(), stdout);
+            return 0;
+        }
         if (tokens) {
             DumpTokens(filename);
             return 0;

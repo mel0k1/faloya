@@ -971,6 +971,13 @@ struct Parser {
     
 
     TypeExpr *ParseType() {
+        auto typebegin = lex.attr.data();
+        auto t = ParseTypeInner();
+        if (t) { t->srcbegin = typebegin; t->srcend = lex.prevend; }
+        return t;
+    }
+
+    TypeExpr *ParseTypeInner() {
         
         
         

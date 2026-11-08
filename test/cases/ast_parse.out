@@ -11,9 +11,12 @@ file
       expr
         call
           name print
-          str "x=${x}"
+          call
+            name str
+            str "x="
+            name x
 
-nodes: 14 tokens: 21
+nodes: 17 tokens: 23
 ----
 file
   fn add
@@ -23,29 +26,33 @@ file
       raw i64
     raw i64
     block
-      return
-        bin +
-          name a
-          name b
+      expr
+        return
+          bin +
+            name a
+            name b
 
-nodes: 12 tokens: 21
+nodes: 13 tokens: 21
 ----
 file
   fn f
     param xs
       raw i32[:]
     block
-      for
-        name x
-        name xs
-        block
-          if
-            bin >
-              name x
-              int 0
-            block
-              continue
+      expr tail
+        for
+          name x
+          name xs
+          block
+            expr tail
+              if
+                bin >
+                  name x
+                  int 0
+                block
+                  expr
+                    continue
 
-nodes: 15 tokens: 27
+nodes: 18 tokens: 27
 ----
 ast: line 1: expected a name near '{'
