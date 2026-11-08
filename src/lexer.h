@@ -121,6 +121,9 @@ struct Lexer {
     double fval = 0;                 
     string sval;                     
     bool smultiline = false;         
+    bool sinterp = false;            
+    bool interpop = false;           
+    vector<int> interp;              
     int tokline = 1;
     const char *toklinestart = nullptr;
     
@@ -218,6 +221,19 @@ struct Lexer {
     }
 
     void Next() {
+        interpop = false;
+        NextRaw();
+        if (interp.empty()) return;
+        if (tok == T_LCURLY) { interp.back()++; return; }
+        if (tok == T_RCURLY) {
+            if (interp.back() > 0) { interp.back()--; return; }
+            interp.pop_back();
+            interpop = true;
+            LexStringBody(p);
+        }
+    }
+
+    void NextRaw() {
         prevend = p;
         prevendline = line;
         prevendlinestart = linestart;
@@ -369,11 +385,7 @@ struct Lexer {
                     Set(T_STRLIT);
                     return;
                 }
-                sval.clear();
-                smultiline = false;
-                while (*p != '"') sval += (char)LexEscapedChar('"');
-                p++;
-                Set(T_STRLIT);
+                LexStringBody(start);
                 return;
             }
 
@@ -465,6 +477,28 @@ struct Lexer {
     
     
     
+    void LexStringBody(const char *start) {
+        sval.clear();
+        smultiline = false;
+        while (*p != '"') {
+            if (*p == '$' && p[1] == '{') {
+                p += 2;
+                interp.push_back(0);
+                sinterp = true;
+                tok = T_STRLIT;
+                attr = string_view(start, (size_t)(p - start));
+                scanning = false;
+                return;
+            }
+            sval += (char)LexEscapedChar('"');
+        }
+        p++;
+        sinterp = false;
+        tok = T_STRLIT;
+        attr = string_view(start, (size_t)(p - start));
+        scanning = false;
+    }
+
     void LexRawString() {
         sval.clear();
         auto q = p;
@@ -526,6 +560,7 @@ struct Lexer {
                 case '\\': return '\\';
                 case '"':  return '"';
                 case '\'': return '\'';
+                case '$':  return '$';
                 case 'x': {
                     if (!isxdigit((uint8_t)p[0]) || !isxdigit((uint8_t)p[1]))
                         Error("\\x escape requires two hex digits");

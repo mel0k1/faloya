@@ -1653,6 +1653,24 @@ struct Parser {
         return Finish(result);
     }
 
+    Node *ParseStrInterp(Line line) {
+        auto c = New<Call>(line, New<Ident>(line, "str", curns));
+        for (;;) {
+            if (!lex.sval.empty()) c->args.push_back(Finish(New<StrLit>(line, lex.sval)));
+            if (!lex.sinterp) {
+                lex.Next();
+                break;
+            }
+            lex.Next();
+            if (lex.tok == T_STRLIT && !lex.sinterp && lex.interpop)
+                Error("empty interpolation in \"${ }\"");
+            c->args.push_back(ParseExpr());
+            if (lex.tok != T_STRLIT)
+                Error("expected the rest of the string after \"${\"");
+        }
+        return Finish(c);
+    }
+
     Node *ParsePrimary() {
         auto line = CurLine();
         switch (lex.tok) {
@@ -1667,6 +1685,7 @@ struct Parser {
                 return Finish(n);
             }
             case T_STRLIT: {
+                if (lex.sinterp) return ParseStrInterp(line);
                 auto n = New<StrLit>(line, lex.sval, lex.smultiline);
                 lex.Next();
                 return Finish(n);
