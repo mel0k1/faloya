@@ -1,17 +1,65 @@
 namespace cgen;
 import std;
 
+const KInt = 0;
+const KBool = 1;
+const KFloat = 2;
+const KStr = 3;
+const KFixed = 4;
+const KSlice = 5;
+const KGrow = 6;
+const KStruct = 7;
+const KEnum = 8;
+const KRef = 9;
+
 root struct Gen {
     out: u8[>..] = [],
+    hdr: u8[>..] = [],
+    aux: u8[>..] = [],
     ok: bool = true,
     msg: const u8[:] = "",
     line: i32 = 0,
+    ns: const u8[:] = "",
     names: const u8[:][>..] = [],
-    types: const u8[:][>..] = [],
+    vcs: const u8[:][>..] = [],
+    vctys: const u8[:][>..] = [],
+    vkinds: i64[>..] = [],
+    velems: const u8[:][>..] = [],
+    vekinds: i64[>..] = [],
+    vlen: i64 = 0,
+    nglobals: i64 = 0,
     fns: const u8[:][>..] = [],
     frets: const u8[:][>..] = [],
+    frkinds: const u8[:][>..] = [],
+    frelems: const u8[:][>..] = [],
+    fretlist: const u8[:][>..] = [],
+    fptys: const u8[:][>..] = [],
+    fpkinds: const u8[:][>..] = [],
+    snames: const u8[:][>..] = [],
+    scnames: const u8[:][>..] = [],
+    sids: i64[>..] = [],
+    sps: ast::Parser&[>..] = [],
+    enames: const u8[:][>..] = [],
+    ecnames: const u8[:][>..] = [],
+    ttexts: const u8[:][>..] = [],
+    tctys: const u8[:][>..] = [],
+    tkinds: i64[>..] = [],
+    telems: const u8[:][>..] = [],
+    tekinds: i64[>..] = [],
+    tnums: i64[>..] = [],
+    tds: const u8[:][>..] = [],
+    hkeys: const u8[:][>..] = [],
+    ccs: const u8[:][>..] = [],
+    ces: const u8[:][>..] = [],
+    ceks: i64[>..] = [],
+    cns: i64[>..] = [],
     tmp: i64 = 0,
+    use_args: bool = false,
+    tuple_ctx: bool = false,
 }
+
+var spool: u8[67108864];
+var spool_n: i64 = 0;
 
 fn fail(g: Gen&, m: const u8[:], p: ast::Parser&, id: i64) {
     if g.ok {
@@ -48,47 +96,164 @@ fn child_count(p: ast::Parser&, id: i64) -> i64 {
 
 fn text_of(p: ast::Parser&, id: i64) -> const u8[:] { return p.nodes[id].text; }
 
-fn ctype_of(g: Gen&, span: const u8[:]) -> const u8[:] {
-    if span == "i64" || span == "varint" { return "long long"; }
-    if span == "i32" { return "int"; }
-    if span == "i16" { return "short"; }
-    if span == "i8" { return "signed char"; }
-    if span == "u64" { return "unsigned long long"; }
-    if span == "u32" { return "unsigned int"; }
-    if span == "u16" { return "unsigned short"; }
-    if span == "u8" { return "unsigned char"; }
-    if span == "bool" { return "bool"; }
-    return "";
+fn emit(g: Gen&, text: const u8[:]) {
+    for i in text.len { g.out.push(text[i]); }
 }
 
-fn is_int_type(ty: const u8[:]) -> bool {
-    return ty == "long long" || ty == "int" || ty == "short" || ty == "signed char"
-        || ty == "unsigned long long" || ty == "unsigned int" || ty == "unsigned short"
-        || ty == "unsigned char" || ty == "bool";
+fn emit_hdr(g: Gen&, text: const u8[:]) {
+    for i in text.len { g.hdr.push(text[i]); }
 }
 
-fn is_unsigned(ty: const u8[:]) -> bool {
-    return ty == "unsigned long long" || ty == "unsigned int" || ty == "unsigned short"
-        || ty == "unsigned char";
+fn emit_aux(g: Gen&, text: const u8[:]) {
+    for i in text.len { g.aux.push(text[i]); }
 }
 
-fn lookup_type(g: Gen&, name: const u8[:]) -> const u8[:] {
-    for i in g.names.len {
-        if g.names[i] == name { return g.types[i]; }
+fn emit_indent(g: Gen&, depth: i64) {
+    for i in depth { emit(g, "    "); }
+}
+
+fn push_text(out: u8[>..]&, text: const u8[:]) {
+    for i in text.len { out.push(text[i]); }
+}
+
+fn spool_put(c: u8) {
+    spool[spool_n] = c;
+    spool_n = spool_n + 1;
+}
+
+fn spool_text(t: const u8[:]) {
+    for i in t.len { spool_put(t[i]); }
+}
+
+fn spool_copy(buf: u8[>..]&) -> const u8[:] {
+    let m = spool_n;
+    for i in buf.len { spool_put(buf[i]); }
+    return spool[m..spool_n];
+}
+
+fn num_text(v: i64) -> const u8[:] {
+    let m = spool_n;
+    var x = v;
+    if x < 0 {
+        spool_put('-');
+        x = 0 - x;
     }
-    return "";
-}
-
-fn lookup_ret(g: Gen&, name: const u8[:]) -> const u8[:] {
-    for i in g.fns.len {
-        if g.fns[i] == name { return g.frets[i]; }
+    if x == 0 {
+        spool_put('0');
     }
-    return "";
+    var digits: i64[>..] = [];
+    while x > 0 {
+        digits.push(x % 10);
+        x = x / 10;
+    }
+    var i = digits.len;
+    while i > 0 {
+        i--;
+        spool_put('0' + (digits[i] as u8));
+    }
+    return spool[m..spool_n];
 }
 
-fn declare(g: Gen&, name: const u8[:], ty: const u8[:]) {
-    g.names.push(name);
-    g.types.push(ty);
+fn cat(a: const u8[:], b: const u8[:]) -> const u8[:] {
+    let m = spool_n;
+    spool_text(a);
+    spool_text(b);
+    return spool[m..spool_n];
+}
+
+fn cat2(a: const u8[:], b: const u8[:]) -> const u8[:] {
+    return cat(a, b);
+}
+
+fn cat3(a: const u8[:], b: const u8[:], c: const u8[:]) -> const u8[:] {
+    let m = spool_n;
+    spool_text(a);
+    spool_text(b);
+    spool_text(c);
+    return spool[m..spool_n];
+}
+
+fn cat4(a: const u8[:], b: const u8[:], c: const u8[:], d: const u8[:]) -> const u8[:] {
+    let m = spool_n;
+    spool_text(a);
+    spool_text(b);
+    spool_text(c);
+    spool_text(d);
+    return spool[m..spool_n];
+}
+
+fn cat5(a: const u8[:], b: const u8[:], c: const u8[:], d: const u8[:], e: const u8[:]) -> const u8[:] {
+    let m = spool_n;
+    spool_text(a);
+    spool_text(b);
+    spool_text(c);
+    spool_text(d);
+    spool_text(e);
+    return spool[m..spool_n];
+}
+
+fn cat6(a: const u8[:], b: const u8[:], c: const u8[:], d: const u8[:], e: const u8[:], f: const u8[:]) -> const u8[:] {
+    let m = spool_n;
+    spool_text(a);
+    spool_text(b);
+    spool_text(c);
+    spool_text(d);
+    spool_text(e);
+    spool_text(f);
+    return spool[m..spool_n];
+}
+
+fn cat7(a: const u8[:], b: const u8[:], c: const u8[:], d: const u8[:], e: const u8[:], f: const u8[:], h: const u8[:]) -> const u8[:] {
+    let m = spool_n;
+    spool_text(a);
+    spool_text(b);
+    spool_text(c);
+    spool_text(d);
+    spool_text(e);
+    spool_text(f);
+    spool_text(h);
+    return spool[m..spool_n];
+}
+
+fn mangle(text: const u8[:]) -> const u8[:] {
+    let m = spool_n;
+    for i in text.len {
+        let c = text[i];
+        if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' {
+            spool_put(c);
+        } else {
+            spool_put('_');
+        }
+    }
+    return spool[m..spool_n];
+}
+
+fn tag_of(c: const u8[:]) -> const u8[:] {
+    if c == "long long" { return "i64"; }
+    if c == "unsigned long long" { return "u64"; }
+    if c == "int" { return "i32"; }
+    if c == "unsigned int" { return "u32"; }
+    if c == "short" { return "i16"; }
+    if c == "unsigned short" { return "u16"; }
+    if c == "signed char" { return "i8"; }
+    if c == "unsigned char" { return "u8"; }
+    if c == "bool" { return "bool"; }
+    if c == "double" { return "f64"; }
+    if c == "float" { return "f32"; }
+    if c == "_str" { return "str"; }
+    return mangle(c);
+}
+
+fn int_ctype(name: const u8[:]) -> const u8[:] {
+    if name == "i64" || name == "varint" { return "long long"; }
+    if name == "i32" { return "int"; }
+    if name == "i16" { return "short"; }
+    if name == "i8" { return "signed char"; }
+    if name == "u64" { return "unsigned long long"; }
+    if name == "u32" { return "unsigned int"; }
+    if name == "u16" { return "unsigned short"; }
+    if name == "u8" { return "unsigned char"; }
+    return "";
 }
 
 fn is_c_keyword(name: const u8[:]) -> bool {
@@ -102,109 +267,1312 @@ fn is_c_keyword(name: const u8[:]) -> bool {
         || name == "register" || name == "volatile" || name == "extern";
 }
 
-fn emit(g: Gen&, text: const u8[:]) {
-    for i in text.len { g.out.push(text[i]); }
+fn strip_ws(t: const u8[:]) -> const u8[:] {
+    var lo: i64 = 0;
+    var hi = t.len;
+    while lo < hi && t[lo] == ' ' { lo++; }
+    while hi > lo && t[hi - 1] == ' ' { hi--; }
+    return t[lo..hi];
 }
 
-fn emit_buf(g: Gen&, buf: u8[>..]&) {
-    for i in buf.len { g.out.push(buf[i]); }
+fn unsigned_ctype(c: const u8[:]) -> bool {
+    return c == "unsigned long long" || c == "unsigned int" || c == "unsigned short"
+        || c == "unsigned char";
 }
 
-fn emit_indent(g: Gen&, depth: i64) {
-    for i in depth { emit(g, "    "); }
+fn is_container(k: i64) -> bool {
+    return k == KStr || k == KSlice || k == KGrow || k == KFixed;
 }
 
-fn push_text(out: u8[>..]&, text: const u8[:]) {
-    for i in text.len { out.push(text[i]); }
-}
-
-fn c_fmt_text(content: const u8[:], out: u8[>..]&) {
-    for i in content.len {
-        let c = content[i];
-        if c == '\\' { out.push('\\'); out.push('\\'); }
-        else if c == '"' { out.push('\\'); out.push('"'); }
-        else if c == '%' { out.push('%'); out.push('%'); }
-        else if c == '\n' { out.push('\\'); out.push('n'); }
-        else if c == '\t' { out.push('\\'); out.push('t'); }
-        else if c == '\r' { out.push('\\'); out.push('r'); }
-        else if c == 0 { out.push('\\'); out.push('0'); }
-        else if c < 32 || c >= 127 {
-            let h = (c as i64) >> 4;
-            let l = (c as i64) & 15;
-            out.push('\\');
-            out.push('x');
-            out.push(if h < 10 { '0' + h as u8 } else { 'a' + (h - 10) as u8 });
-            out.push(if l < 10 { '0' + l as u8 } else { 'a' + (l - 10) as u8 });
+fn num_val(t: const u8[:]) -> i64 {
+    var v: i64 = 0;
+    for i in t.len {
+        if t[i] >= '0' && t[i] <= '9' {
+            v = v * 10 + (t[i] - '0');
         }
-        else { out.push(c); }
+    }
+    return v;
+}
+
+fn cache_find(g: Gen&, text: const u8[:]) -> i64 {
+    for i in g.ttexts.len {
+        if g.ttexts[i] == text { return i; }
+    }
+    return -1;
+}
+
+fn register_typedef(g: Gen&, name: const u8[:], def: const u8[:]) {
+    for i in g.tds.len {
+        if g.tds[i] == name { return; }
+    }
+    g.tds.push(name);
+    emit_hdr(g, def);
+    emit_hdr(g, "\n");
+}
+
+fn need_helper(g: Gen&, key: const u8[:]) -> bool {
+    for i in g.hkeys.len {
+        if g.hkeys[i] == key { return false; }
+    }
+    g.hkeys.push(key);
+    return true;
+}
+
+fn lookup_var(g: Gen&, name: const u8[:]) -> i64 {
+    var found: i64 = -1;
+    for i in g.vlen {
+        if g.names[i] == name { found = i; }
+    }
+    return found;
+}
+
+fn c_name_free(g: Gen&, cn: const u8[:]) -> bool {
+    for i in g.vlen {
+        if g.vcs[i] == cn { return false; }
+    }
+    return true;
+}
+
+fn declare(g: Gen&, name: const u8[:], c: const u8[:], k: i64, e: const u8[:], ek: i64) -> const u8[:] {
+    var cn: const u8[:] = cat("", name);
+    var n: i64 = 2;
+    while !c_name_free(g, cn) {
+        cn = cat3(name, "_", num_text(n));
+        n = n + 1;
+    }
+    if g.vlen < g.names.len {
+        g.names[g.vlen] = name;
+        g.vcs[g.vlen] = cn;
+        g.vctys[g.vlen] = c;
+        g.vkinds[g.vlen] = k;
+        g.velems[g.vlen] = e;
+        g.vekinds[g.vlen] = ek;
+    } else {
+        g.names.push(name);
+        g.vcs.push(cn);
+        g.vctys.push(c);
+        g.vkinds.push(k);
+        g.velems.push(e);
+        g.vekinds.push(ek);
+    }
+    g.vlen = g.vlen + 1;
+    return cn;
+}
+
+fn var_c(g: Gen&, i: i64) -> const u8[:] { return g.vctys[i]; }
+fn vc_of(g: Gen&, i: i64) -> const u8[:] { return g.vcs[i]; }
+fn var_k(g: Gen&, i: i64) -> i64 { return g.vkinds[i]; }
+fn var_e(g: Gen&, i: i64) -> const u8[:] { return g.velems[i]; }
+fn var_ek(g: Gen&, i: i64) -> i64 { return g.vekinds[i]; }
+
+
+fn c_elem_of(g: Gen&, c: const u8[:]) -> const u8[:] {
+    for i in g.ccs.len {
+        if g.ccs[i] == c { return g.ces[i]; }
+    }
+    return "";
+}
+
+fn c_kind_of(g: Gen&, c: const u8[:]) -> i64 {
+    for i in g.ccs.len {
+        if g.ccs[i] == c { return g.ceks[i]; }
+    }
+    return 0;
+}
+
+fn c_size_of(g: Gen&, c: const u8[:]) -> i64 {
+    for i in g.ccs.len {
+        if g.ccs[i] == c { return g.cns[i]; }
+    }
+    return 0;
+}
+
+fn register_cc(g: Gen&, c: const u8[:], e: const u8[:], ek: i64, n: i64) {
+    var dupc = false;
+    for i in g.ccs.len {
+        if g.ccs[i] == c { dupc = true; }
+    }
+    if !dupc {
+        g.ccs.push(c);
+        g.ces.push(e);
+        g.ceks.push(ek);
+        g.cns.push(n);
     }
 }
 
-recursive fn expr_type(g: Gen&, p: ast::Parser&, id: i64) -> const u8[:] {
+fn ty_parse(g: Gen&, p: ast::Parser&, id: i64, span: const u8[:]) -> const u8[:], i64, const u8[:], i64, i64 {
+    let t = strip_ws(span);
+    let ci = cache_find(g, t);
+    if ci >= 0 { return g.tctys[ci], g.tkinds[ci], g.telems[ci], g.tekinds[ci], g.tnums[ci]; }
+    var c: const u8[:] = "";
+    var k: i64 = 0;
+    var e: const u8[:] = "";
+    var ek: i64 = 0;
+    var n: i64 = 0;
+    var constf = false;
+    var body = t;
+    if t.len >= 6 && t[..6] == "const " {
+        constf = true;
+        body = strip_ws(t[6..]);
+    }
+    var tref: i64 = 0;
+    while body.len > 0 && body[body.len - 1] == '&' {
+        tref++;
+        body = strip_ws(body[..body.len - 1]);
+    }
+    {
+        var i: i64 = 0;
+        while i < body.len && body[i] != '[' { i++; }
+        var base = strip_ws(body[..i]);
+        var nref: i64 = 0;
+        while base.len > 0 && base[base.len - 1] == '&' {
+            nref++;
+            base = strip_ws(base[..base.len - 1]);
+        }
+        let icb = int_ctype(base);
+        if base == "bool" {
+            c = "bool";
+            k = KBool;
+        } else if base == "f64" {
+            c = "double";
+            k = KFloat;
+        } else if base == "f32" {
+            c = "float";
+            k = KFloat;
+        } else if icb != "" {
+            c = icb;
+            k = KInt;
+            register_cc(g, c, "", 0, 0);
+        } else {
+            let sn = resolve_struct(g, base);
+            let en = resolve_enum(g, base);
+            if sn != "" {
+                c = cat("", sn);
+                k = KStruct;
+            } else if en != "" {
+                c = cat("", en);
+                k = KEnum;
+            } else {
+                {
+                    var m: u8[>..] = [];
+                    format(m, "TYFAIL kind=", ast::kind_name(p.nodes[id].k), " text=", p.nodes[id].text, " line=", p.nodes[id].line);
+                    print(m);
+                }
+                fail(g, cat5("unknown type '", base, "' from span '", span, "'"), p, id);
+                return "", 0, "", 0, 0;
+            }
+        }
+        while nref > 0 {
+            e = cat("", c);
+            ek = k;
+            c = cat(c, "*");
+            k = KRef;
+            nref--;
+            register_cc(g, c, e, ek, 0);
+        }
+        while i < body.len {
+            guard body[i] == '[' else {
+                fail(g, "malformed type", p, id);
+                return "", 0, "", 0, 0;
+            }
+            var j = i + 1;
+            while j < body.len && body[j] != ']' { j++; }
+            guard j < body.len else {
+                fail(g, "malformed type", p, id);
+                return "", 0, "", 0, 0;
+            }
+            let inner = strip_ws(body[i + 1..j]);
+            if inner == ":" {
+                if constf && k == KInt && c == "unsigned char" && e == "" {
+                    register_typedef(g, "_str", "typedef struct { const unsigned char* p; long long n; } _str;");
+                    c = "_str";
+                    k = KStr;
+                    e = "unsigned char";
+                    ek = KInt;
+                } else {
+                    let tn = cat("_s_", tag_of(c));
+                    register_typedef(g, tn, cat5("typedef struct { ", c, "* p; long long n; } ", tn, ";"));
+                    e = cat("", c);
+                    ek = k;
+                    c = cat("", tn);
+                    k = KSlice;
+                    register_cc(g, c, e, ek, 0);
+                }
+            } else if inner == ">.." {
+                let tn = cat("_g_", tag_of(c));
+                register_typedef(g, tn, cat4("typedef struct { ", c, "* p; long long n; long long c; } ", cat2(tn, ";")));
+                e = cat("", c);
+                ek = k;
+                c = cat("", tn);
+                k = KGrow;
+                register_cc(g, c, e, ek, 0);
+            } else {
+                var okn = inner.len > 0;
+                var val: i64 = 0;
+                for d in inner.len {
+                    if inner[d] >= '0' && inner[d] <= '9' {
+                        val = val * 10 + (inner[d] - '0');
+                    } else {
+                        okn = false;
+                    }
+                }
+                guard okn else {
+                    fail(g, "only numeric array sizes are supported yet", p, id);
+                    return "", 0, "", 0, 0;
+                }
+                let tn = cat4("_a_", tag_of(c), "_", num_text(val));
+                register_typedef(g, tn, cat6("typedef struct { ", c, " v[", num_text(val), "]; } ", cat2(tn, ";")));
+                e = cat("", c);
+                ek = k;
+                n = val;
+                c = cat("", tn);
+                k = KFixed;
+                register_cc(g, c, e, ek, n);
+            }
+            i = j + 1;
+        }
+    }
+    while tref > 0 {
+        e = cat("", c);
+        ek = k;
+        c = cat(c, "*");
+        k = KRef;
+        tref--;
+        register_cc(g, c, e, ek, 0);
+    }
+    g.ttexts.push(t);
+    g.tctys.push(c);
+    g.tkinds.push(k);
+    g.telems.push(e);
+    g.tekinds.push(ek);
+    g.tnums.push(n);
+    register_cc(g, c, e, ek, n);
+    return c, k, e, ek, n;
+}
+
+fn qual(text: const u8[:]) -> const u8[:] {
+    let m = spool_n;
+    var i: i64 = 0;
+    while i < text.len {
+        if text[i] == ':' {
+            spool_put('_');
+            if i + 1 < text.len && text[i + 1] == ':' { i++; }
+        } else {
+            spool_put(text[i]);
+        }
+        i++;
+    }
+    return spool[m..spool_n];
+}
+
+fn suffix_resolve(g: Gen&, q: const u8[:]) -> i64 {
+    for i in g.snames.len {
+        var s = g.snames[i];
+        if s.len > q.len + 1 && s[s.len - q.len - 1] == '_' && s[s.len - q.len..] == q {
+            return i;
+        }
+    }
+    return -1;
+}
+
+fn resolve_struct(g: Gen&, name: const u8[:]) -> const u8[:] {
+    let q = mangle(qual(name));
+    for i in g.snames.len {
+        if g.snames[i] == q { return g.scnames[i]; }
+    }
+    if g.ns != "" {
+        let nq = mangle(cat3(g.ns, "_", name));
+        for i in g.snames.len {
+            if g.snames[i] == nq { return g.scnames[i]; }
+        }
+    }
+    let si = suffix_resolve(g, q);
+    if si >= 0 { return g.scnames[si]; }
+    return "";
+}
+
+fn resolve_enum(g: Gen&, name: const u8[:]) -> const u8[:] {
+    let q = mangle(qual(name));
+    for i in g.enames.len {
+        if g.enames[i] == q { return g.ecnames[i]; }
+    }
+    if g.ns != "" {
+        let nq = mangle(cat3(g.ns, "_", name));
+        for i in g.enames.len {
+            if g.enames[i] == nq { return g.ecnames[i]; }
+        }
+    }
+    for i in g.enames.len {
+        let s = g.enames[i];
+        if s.len > q.len + 1 && s[s.len - q.len - 1] == '_' && s[s.len - q.len..] == q {
+            return g.ecnames[i];
+        }
+    }
+    return "";
+}
+
+fn resolve_fn(g: Gen&, name: const u8[:]) -> const u8[:] {
+    let q = mangle(qual(name));
+    for i in g.fns.len {
+        if g.fns[i] == q { return g.fns[i]; }
+    }
+    if g.ns != "" {
+        let nq = mangle(cat3(g.ns, "_", name));
+        for i in g.fns.len {
+            if g.fns[i] == nq { return g.fns[i]; }
+        }
+    }
+    return "";
+}
+
+fn struct_sid(g: Gen&, cname: const u8[:]) -> i64 {
+    for i in g.scnames.len {
+        if g.scnames[i] == cname { return g.sids[i]; }
+    }
+    return -1;
+}
+
+fn field_split(span: const u8[:]) -> const u8[:], const u8[:] {
+    var i: i64 = 0;
+    while i < span.len && span[i] != ':' { i++; }
+    guard i < span.len else { return "", ""; }
+    return strip_ws(span[..i]), strip_ws(span[i + 1..]);
+}
+
+fn struct_pi(g: Gen&, sid: i64) -> i64 {
+    for i in g.sids.len {
+        if g.sids[i] == sid { return i; }
+    }
+    return -1;
+}
+
+fn field_ty(g: Gen&, p: ast::Parser&, sid: i64, fname: const u8[:]) -> const u8[:], i64, const u8[:], i64, i64 {
+    let pi = struct_pi(g, sid);
+    guard pi >= 0 else {
+        fail(g, "unknown struct", p, sid);
+        return "", 0, "", 0, 0;
+    }
+    let dp = g.sps[pi];
+    var c = dp.nodes[sid].first;
+    while c >= 0 {
+        let fn_, ty = field_split(dp.nodes[c].text);
+        if fn_ == fname {
+            return ty_parse(g, p, c, ty);
+        }
+        c = dp.nodes[c].next;
+    }
+    {
+        var m: u8[>..] = [];
+        format(m, "FTYFAIL fname=", fname, " sid=", sid, " pi=", pi, " nodekind=", ast::kind_name(dp.nodes[sid].k), " nodetext=", dp.nodes[sid].text);
+        print(m);
+    }
+    fail(g, cat5("no field '", fname, "' in ", dp.nodes[sid].text, ""), p, sid);
+    return "", 0, "", 0, 0;
+}
+
+
+fn emit_fwd_structs(g: Gen&, p: ast::Parser&, root: i64) {
+    var c = first_child(p, root);
+    while c >= 0 {
+        var n .= p.nodes[c];
+        if n.k == ast::Nk.Struct {
+            let cn = if g.ns != "" { mangle(cat3(g.ns, "_", n.text)) } else { mangle(n.text) };
+            var dup = false;
+            for i in g.snames.len {
+                if g.snames[i] == cn { dup = true; }
+            }
+            if !dup {
+                g.snames.push(cn);
+                g.scnames.push(cn);
+                g.sids.push(c);
+                g.sps.push(p);
+                emit_hdr(g, cat("typedef struct ", cat4(cn, " ", cn, ";")));
+                emit_hdr(g, "\n");
+            } else {
+                fail(g, "duplicate struct name", p, c);
+                return;
+            }
+        } else if n.k == ast::Nk.Enum {
+            let cn = if g.ns != "" { mangle(cat3(g.ns, "_", n.text)) } else { mangle(n.text) };
+            var dup = false;
+            for i in g.enames.len {
+                if g.enames[i] == cn { dup = true; }
+            }
+            if !dup {
+                g.enames.push(cn);
+                g.ecnames.push(cn);
+            } else {
+                fail(g, "duplicate enum name", p, c);
+                return;
+            }
+        }
+        c = n.next;
+    }
+}
+
+fn emit_enums(g: Gen&, p: ast::Parser&, root: i64) {
+    var c = first_child(p, root);
+    while c >= 0 {
+        var n .= p.nodes[c];
+        if n.k == ast::Nk.Enum {
+            let cn = if g.ns != "" { mangle(cat3(g.ns, "_", n.text)) } else { mangle(n.text) };
+            emit_hdr(g, "typedef enum {\n");
+            var v = n.first;
+            var vi: i64 = 0;
+            while v >= 0 {
+                var vn .= p.nodes[v];
+                guard vn.k == ast::Nk.Raw && vn.text != "{" && vn.text != "(" else {
+                    fail(g, "enum payloads are not supported yet", p, v);
+                    return;
+                }
+                emit_hdr(g, "    ");
+                emit_hdr(g, cat3(cn, "_", vn.text));
+                if vi + 1 < child_count(p, c) { emit_hdr(g, ","); }
+                emit_hdr(g, "\n");
+                vi++;
+                v = vn.next;
+            }
+            emit_hdr(g, cat3("} ", cn, ";\n\n"));
+        }
+        c = n.next;
+    }
+}
+
+fn emit_structs(g: Gen&, p: ast::Parser&, root: i64) {
+    var c = first_child(p, root);
+    while c >= 0 {
+        var n .= p.nodes[c];
+        if n.k == ast::Nk.Struct {
+            let cn = if g.ns != "" { mangle(cat3(g.ns, "_", n.text)) } else { mangle(n.text) };
+            var f = n.first;
+            var generic = false;
+            while f >= 0 {
+                let fn_, ty = field_split(p.nodes[f].text);
+                if fn_ == "" { generic = true; }
+                f = p.nodes[f].next;
+            }
+            guard !generic else {
+                fail(g, "generic structs are not supported yet", p, c);
+                return;
+            }
+            f = n.first;
+            var lines: u8[>..] = [];
+            while f >= 0 {
+                let fn_, ty = field_split(p.nodes[f].text);
+                let fc, fk, fe, fek, fn2 = ty_parse(g, p, f, ty);
+                guard g.ok else { return; }
+                push_text(lines, "    ");
+                push_text(lines, fc);
+                push_text(lines, " ");
+                push_text(lines, fn_);
+                push_text(lines, ";\n");
+                f = p.nodes[f].next;
+            }
+            emit_hdr(g, cat3("typedef struct ", cn, " {\n"));
+            emit_hdr(g, lines);
+            emit_hdr(g, cat3("} ", cn, ";\n\n"));
+        }
+        c = n.next;
+    }
+}
+
+fn scan_globals(g: Gen&, p: ast::Parser&, root: i64) {
+    var c = first_child(p, root);
+    while c >= 0 {
+        var n .= p.nodes[c];
+        if n.k == ast::Nk.Let {
+            var nnames: i64 = 0;
+            var ninit: i64 = 0;
+            var tyid: i64 = -1;
+            var cc = n.first;
+            while cc >= 0 {
+                var cn .= p.nodes[cc];
+                if cn.k == ast::Nk.Name && ninit == 0 && (cn.val & 2) != 0 {
+                    nnames++;
+                } else if cn.k == ast::Nk.Raw && ninit == 0 {
+                    tyid = cc;
+                } else {
+                    ninit++;
+                }
+                cc = cn.next;
+            }
+            guard nnames == 1 && ninit <= 1 else {
+                fail(g, "globals take one name", p, c);
+                return;
+            }
+            let name1 = nth_child(p, c, 0);
+            if is_c_keyword(p.nodes[name1].text) {
+                fail(g, "the global name clashes with a C keyword", p, c);
+                return;
+            }
+            var tc: const u8[:] = "";
+            var tk: i64 = 0;
+            var te: const u8[:] = "";
+            var tek: i64 = 0;
+            if tyid >= 0 {
+                let a, b, d, e2, f2 = ty_parse(g, p, tyid, text_of(p, tyid));
+                tc = cat("", a);
+                tk = b;
+                te = cat("", d);
+                tek = e2;
+            } else {
+                guard ninit == 1 else {
+                    fail(g, "a global needs a type", p, c);
+                    return;
+                }
+                let init = nth_child(p, c, child_count(p, c) - 1);
+                let a, b, d, e2, f2 = expr_ty(g, p, init);
+                tc = cat("", a);
+                tk = b;
+                te = cat("", d);
+                tek = e2;
+            }
+            guard g.ok else { return; }
+            let gcn = declare(g, p.nodes[name1].text, tc, tk, te, tek);
+            emit_hdr(g, cat4("static ", tc, " ", gcn));
+            if ninit == 1 {
+                let init = nth_child(p, c, child_count(p, c) - 1);
+                var inn .= p.nodes[init];
+                if inn.k == ast::Nk.Int {
+                    emit_hdr(g, cat2(" = ", num_text(inn.val)));
+                } else if inn.k == ast::Nk.Str {
+                    var raw: u8[>..] = [];
+                    ast::str_content(inn.text, raw);
+                    emit_hdr(g, cat5(" = (_str){ (const unsigned char*)\"", c_lit_esc(raw), "\", ", num_text(raw.len), " }"));
+                } else if inn.k == ast::Nk.Arr && child_count(p, init) == 0 {
+                    emit_hdr(g, " = { 0, 0, 0 }");
+                } else {
+                    fail(g, "global initializers must be constant yet", p, c);
+                    return;
+                }
+            }
+            emit_hdr(g, ";\n\n");
+        }
+        c = n.next;
+    }
+}
+
+fn scan_fn_sigs(g: Gen&, p: ast::Parser&, root: i64) {
+    var c = first_child(p, root);
+    while c >= 0 {
+        var n .= p.nodes[c];
+        if n.k == ast::Nk.Fn {
+            if n.val & 1 != 0 || n.val & 2 != 0 || n.val & 8 != 0 || n.val & 16 != 0
+                || n.val & 64 != 0 {
+                fail(g, "function qualifiers are not supported yet", p, c);
+                return;
+            }
+            let body = n.last;
+            if body < 0 || p.nodes[body].k != ast::Nk.Block {
+                fail(g, "extern and declared-only functions are not supported yet", p, c);
+                return;
+            }
+            if is_c_keyword(n.text) {
+                fail(g, "the function name clashes with a C keyword", p, c);
+                return;
+            }
+            let cn = if g.ns != "" { mangle(cat3(g.ns, "_", n.text)) } else { mangle(n.text) };
+            for i in g.fns.len {
+                if g.fns[i] == cn {
+                    fail(g, "duplicate function name", p, c);
+                    return;
+                }
+            }
+            var ptys: u8[>..] = [];
+            var pkinds: u8[>..] = [];
+            var seen_param = false;
+            var rets: u8[>..] = [];
+            var rkinds: u8[>..] = [];
+            var relem: u8[>..] = [];
+            var cc = n.first;
+            var np: i64 = 0;
+            var nret: i64 = 0;
+            while cc >= 0 && cc != body {
+                var cn2 .= p.nodes[cc];
+                if cn2.k == ast::Nk.Param {
+                    seen_param = true;
+                    if cn2.val & 1 != 0 {
+                        fail(g, "var parameters are not supported yet", p, cc);
+                        return;
+                    }
+                    if child_count(p, cc) > 1 {
+                        fail(g, "parameter defaults are not supported yet", p, cc);
+                        return;
+                    }
+                    let pty = nth_child(p, cc, 0);
+                    var span: const u8[:] = cat("", "i64");
+                    if pty >= 0 { span = cat("", text_of(p, pty)); }
+                    let pc, pk, pe, pek, pn = ty_parse(g, p, if pty >= 0 { pty } else { cc }, span);
+                    guard g.ok else { return; }
+                    if np > 0 { push_text(ptys, "|"); push_text(pkinds, ","); }
+                    push_text(ptys, pc);
+                    push_text(pkinds, num_text(pk));
+                    np++;
+                } else if cn2.k == ast::Nk.Raw {
+                    guard cn2.val & 1 == 0 else {
+                        fail(g, "generic functions are not supported yet", p, cc);
+                        return;
+                    }
+                    var seg: i64 = 0;
+                    var i: i64 = 0;
+                    while i <= cn2.text.len {
+                        if i == cn2.text.len || cn2.text[i] == ',' {
+                            let part = strip_ws(cn2.text[seg..i]);
+                            if part != "" {
+                                let rc, rk, re, rek, rn = ty_parse(g, p, cc, part);
+                                guard g.ok else { return; }
+                                if nret > 0 { push_text(rets, "|"); push_text(rkinds, ","); }
+                                push_text(rets, rc);
+                                push_text(rkinds, num_text(rk));
+                                if nret == 0 {
+                                    push_text(relem, re);
+                                    push_text(relem, ",");
+                                    push_text(relem, num_text(rek));
+                                }
+                                nret++;
+                            }
+                            seg = i + 1;
+                        }
+                        i++;
+                    }
+                }
+                cc = cn2.next;
+            }
+            let ptys_s = spool_copy(ptys);
+            let pkinds_s = spool_copy(pkinds);
+            let rets_s = spool_copy(rets);
+            let rkinds_s = spool_copy(rkinds);
+            let relem_s = spool_copy(relem);
+            var fret: const u8[:] = "";
+            if nret == 0 {
+                fret = "void";
+            } else if nret == 1 {
+                fret = cat("", rets_s);
+            } else {
+                fret = cat("_r_", cn);
+                emit_hdr(g, "typedef struct {\n");
+                var ri: i64 = 0;
+                var seg2: i64 = 0;
+                for i in rets_s.len + 1 {
+                    if i == rets_s.len || rets_s[i] == '|' {
+                        let part = strip_ws(rets_s[seg2..i]);
+                        if part != "" {
+                            emit_hdr(g, cat5("    ", part, " ", ret_name(ri), ";"));
+                            emit_hdr(g, "\n");
+                            ri++;
+                        }
+                        seg2 = i + 1;
+                    }
+                }
+                emit_hdr(g, cat5("} _r_", cn, ";\n", "", ""));
+            }
+            g.fns.push(cn);
+            g.frets.push(fret);
+            g.frkinds.push(rkinds_s);
+            g.frelems.push(relem_s);
+            g.fptys.push(ptys_s);
+            g.fpkinds.push(pkinds_s);
+            g.fretlist.push(rets_s);
+        }
+        c = n.next;
+    }
+}
+
+recursive fn scan_args_walk(g: Gen&, p: ast::Parser&, id: i64) {
     var n .= p.nodes[id];
-    if n.k == ast::Nk.Int { return "long long"; }
+    if n.k == ast::Nk.Call {
+        let callee = n.first;
+        if callee >= 0 && p.nodes[callee].k == ast::Nk.Name && p.nodes[callee].text == "args" {
+            g.use_args = true;
+        }
+    }
+    var c = n.first;
+    while c >= 0 {
+        scan_args_walk(g, p, c);
+        if !g.ok { return; }
+        c = p.nodes[c].next;
+    }
+}
+
+fn scan_file(g: Gen&, p: ast::Parser&, root: i64) {
+    g.ns = p.ns;
+    if need_helper(g, "includes") {
+        emit_hdr(g, "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n#include <stdbool.h>\n\n");
+    }
+    emit_fwd_structs(g, p, root);
+    if !g.ok { return; }
+    emit_enums(g, p, root);
+    if !g.ok { return; }
+    emit_structs(g, p, root);
+    if !g.ok { return; }
+    scan_globals(g, p, root);
+    if !g.ok { return; }
+    g.nglobals = g.vlen;
+    scan_fn_sigs(g, p, root);
+    if !g.ok { return; }
+    scan_args_walk(g, p, root);
+}
+
+fn emit_fdecls(g: Gen&) {
+    emit_hdr(g, "\n");
+    for i in g.fns.len {
+        if g.fns[i] == "main" {
+            if g.use_args {
+                emit_hdr(g, "int main(int argc, char** argv);\n");
+            } else {
+                emit_hdr(g, "int main(void);\n");
+            }
+            continue;
+        }
+        emit_hdr(g, "static ");
+        emit_hdr(g, g.frets[i]);
+        emit_hdr(g, " ");
+        emit_hdr(g, g.fns[i]);
+        emit_hdr(g, "(");
+        let ptys = g.fptys[i];
+        var seg: i64 = 0;
+        var np: i64 = 0;
+        for j in ptys.len + 1 {
+            if j == ptys.len || ptys[j] == '|' {
+                let part = strip_ws(ptys[seg..j]);
+                if part != "" {
+                    if np > 0 { emit_hdr(g, ", "); }
+                    emit_hdr(g, part);
+                    emit_hdr(g, " _p");
+                    emit_hdr(g, num_text(np));
+                    np++;
+                }
+                seg = j + 1;
+            }
+        }
+        emit_hdr(g, ");\n");
+    }
+    emit_hdr(g, "\n");
+}
+
+
+fn fn_index(g: Gen&, cname: const u8[:]) -> i64 {
+    for i in g.fns.len {
+        if g.fns[i] == cname { return i; }
+    }
+    return -1;
+}
+
+fn ret_count(g: Gen&, fi: i64) -> i64 {
+    let ks = g.frkinds[fi];
+    var n: i64 = 1;
+    for i in ks.len {
+        if ks[i] == ',' { n++; }
+    }
+    return n;
+}
+
+fn ret_kind_at(g: Gen&, fi: i64, at: i64) -> i64 {
+    let ks = g.frkinds[fi];
+    var seg: i64 = 0;
+    var cur: i64 = 0;
+    for i in ks.len + 1 {
+        if i == ks.len || ks[i] == ',' {
+            if cur == at { return num_val(ks[seg..i]); }
+            cur++;
+            seg = i + 1;
+        }
+    }
+    return 0;
+}
+
+fn ret_c_at(g: Gen&, fi: i64, at: i64) -> const u8[:] {
+    let ts = g.fretlist[fi];
+    var seg: i64 = 0;
+    var cur: i64 = 0;
+    for j in ts.len + 1 {
+        if j == ts.len || ts[j] == '|' {
+            if cur == at { return cat("", strip_ws(ts[seg..j])); }
+            cur++;
+            seg = j + 1;
+        }
+    }
+    return "";
+}
+
+fn ret_field(i: i64) -> const u8[:] {
+    if i == 0 { return ".a"; }
+    if i == 1 { return ".b"; }
+    if i == 2 { return ".c"; }
+    if i == 3 { return ".d"; }
+    return ".e";
+}
+
+fn ret_name(i: i64) -> const u8[:] {
+    if i == 0 { return "a"; }
+    if i == 1 { return "b"; }
+    if i == 2 { return "c"; }
+    if i == 3 { return "d"; }
+    return "e";
+}
+
+fn param_ty_at(g: Gen&, fi: i64, at: i64) -> const u8[:], i64 {
+    let ts = g.fptys[fi];
+    let ks = g.fpkinds[fi];
+    var seg: i64 = 0;
+    var kseg: i64 = 0;
+    var cur: i64 = 0;
+    var pi: i64 = 0;
+    for j in ts.len + 1 {
+        if j == ts.len || ts[j] == '|' {
+            if pi == at {
+                var kval: i64 = 0;
+                var k2: i64 = 0;
+                for m in ks.len + 1 {
+                    if m == ks.len || ks[m] == ',' {
+                        if k2 == cur { kval = num_val(ks[kseg..m]); }
+                        k2++;
+                        kseg = m + 1;
+                    }
+                }
+                return cat("", strip_ws(ts[seg..j])), kval;
+            }
+            cur++;
+            pi++;
+            seg = j + 1;
+        }
+    }
+    return "", 0;
+}
+
+recursive fn gen_path(g: Gen&, p: ast::Parser&, id: i64) -> const u8[:], i64, const u8[:], const u8[:], i64 {
+    guard g.ok else { return "", 0, "", "", 0; }
+    var n .= p.nodes[id];
     if n.k == ast::Nk.Name {
-        if n.text == "true" || n.text == "false" { return "int"; }
-        return lookup_type(g, n.text);
+        let vi = lookup_var(g, n.text);
+        if vi < 0 {
+            fail(g, cat3("unknown variable '", n.text, "'"), p, id);
+            return "", 0, "", "", 0;
+        }
+        return cat("", g.vcs[vi]), var_k(g, vi), cat("", var_c(g, vi)), cat("", var_e(g, vi)), var_ek(g, vi);
+    }
+    if n.k == ast::Nk.Field {
+        let bn .= p.nodes[nth_child(p, id, 0)];
+        if bn.k == ast::Nk.Name {
+            let ecn = resolve_enum(g, bn.text);
+            if ecn != "" {
+                return cat3(ecn, "_", n.text), KEnum, cat("", ecn), "", 0;
+            }
+        }
+        var bk0 = bn.k;
+        var slice_base = false;
+        if bk0 == ast::Nk.Index {
+            let bi = nth_child(p, id, 0);
+            if child_count(p, bi) == 2 && p.nodes[nth_child(p, bi, 1)].k == ast::Nk.Range {
+                slice_base = true;
+            }
+        }
+        if slice_base && n.text == "len" {
+            let sv = gen_slice_or_index(g, p, nth_child(p, id, 0), "", 0);
+            guard g.ok else { return "", 0, "", "", 0; }
+            return cat4("(", sv, ")", ".n"), KInt, "long long", "", 0;
+        }
+        if bk0 != ast::Nk.Name && bk0 != ast::Nk.Field && bk0 != ast::Nk.Index {
+            let ec, ek, ee, eek, en = expr_ty(g, p, nth_child(p, id, 0));
+            guard g.ok else { return "", 0, "", "", 0; }
+            var sc: const u8[:] = "";
+            var sep: const u8[:] = ".";
+            if ek == KStruct { sc = cat("", ec); }
+            else if ek == KRef { sc = cat("", ee); sep = "->"; }
+            else if n.text == "len" && (ek == KGrow || ek == KSlice || ek == KStr) {
+                let bv = gen_expr(g, p, nth_child(p, id, 0), "", 0);
+                guard g.ok else { return "", 0, "", "", 0; }
+                return cat4("(", bv, ")", cat3(".n", "", "")), KInt, "long long", "", 0;
+            } else {
+                fail(g, "unknown field", p, id);
+                return "", 0, "", "", 0;
+            }
+            guard sc != "" else {
+                fail(g, "unknown field", p, id);
+                return "", 0, "", "", 0;
+            }
+            let sid = struct_sid(g, sc);
+            guard sid >= 0 else {
+                fail(g, "unknown struct", p, id);
+                return "", 0, "", "", 0;
+            }
+            let fc, fk, fe, fek, fn2 = field_ty(g, p, sid, n.text);
+            guard g.ok else { return "", 0, "", "", 0; }
+            let bv = gen_expr(g, p, nth_child(p, id, 0), "", 0);
+            guard g.ok else { return "", 0, "", "", 0; }
+            return cat5("(", bv, ")", sep, cat2(n.text, "")), fk, cat("", fc), cat("", fe), fek;
+        }
+        let bp, bk, bc, be, bek = gen_path(g, p, nth_child(p, id, 0));
+        guard g.ok else { return "", 0, "", "", 0; }
+        var lk = bk;
+        var lp = bp;
+        if lk == KRef {
+            lk = bek;
+            lp = cat(bp, "->");
+        }
+        if n.text == "len" && (lk == KGrow || lk == KSlice || lk == KStr) {
+            if bk == KRef { return cat2(lp, "n"), KInt, "long long", "", 0; }
+            return cat(lp, ".n"), KInt, "long long", "", 0;
+        }
+        if n.text == "cap" && lk == KGrow {
+            if bk == KRef { return cat2(lp, "c"), KInt, "long long", "", 0; }
+            return cat(lp, ".c"), KInt, "long long", "", 0;
+        }
+        var sc: const u8[:] = "";
+        if bk == KStruct { sc = cat("", bc); }
+        else if bk == KRef && bek == KStruct { sc = cat("", be); }
+        guard sc != "" else {
+            fail(g, cat3("unknown field '", n.text, "'"), p, id);
+            return "", 0, "", "", 0;
+        }
+        let sid = struct_sid(g, sc);
+        guard sid >= 0 else {
+            fail(g, "unknown struct", p, id);
+            return "", 0, "", "", 0;
+        }
+        let fc, fk, fe, fek, fn2 = field_ty(g, p, sid, n.text);
+        guard g.ok else { return "", 0, "", "", 0; }
+        let sep = if bk == KRef { "->" } else { "." };
+        return cat4(bp, sep, n.text, ""), fk, cat("", fc), cat("", fe), fek;
+    }
+    if n.k == ast::Nk.Index {
+        if child_count(p, id) == 2 && p.nodes[nth_child(p, id, 1)].k == ast::Nk.Range {
+            fail(g, "slices are values, not places", p, id);
+            return "", 0, "", "", 0;
+        }
+        var bp0: const u8[:] = "";
+        var bk0: i64 = 0;
+        var bc0: const u8[:] = "";
+        var be0: const u8[:] = "";
+        var bek0: i64 = 0;
+        let bnode = p.nodes[nth_child(p, id, 0)];
+        if bnode.k == ast::Nk.Name || bnode.k == ast::Nk.Field || bnode.k == ast::Nk.Index {
+            let a, b, c, d, e = gen_path(g, p, nth_child(p, id, 0));
+            guard g.ok else { return "", 0, "", "", 0; }
+            bp0 = a;
+            bk0 = b;
+            bc0 = c;
+            be0 = d;
+            bek0 = e;
+        } else {
+            let ec, ek, ee, eek, en = expr_ty(g, p, nth_child(p, id, 0));
+            guard g.ok else { return "", 0, "", "", 0; }
+            bp0 = gen_expr(g, p, nth_child(p, id, 0), "", 0);
+            guard g.ok else { return "", 0, "", "", 0; }
+            bc0 = cat("", ec);
+            bk0 = ek;
+            be0 = cat("", ee);
+            bek0 = eek;
+        }
+        let idx = gen_expr(g, p, nth_child(p, id, 1), "long long", KInt);
+        guard g.ok else { return "", 0, "", "", 0; }
+        var containerc: const u8[:] = "";
+        var bp = bp0;
+        if bk0 == KRef {
+            containerc = cat("", be0);
+            bp = cat(bp0, "->");
+        } else {
+            containerc = cat("", bc0);
+        }
+        let elemc = cat("", c_elem_of(g, containerc));
+        let elemk = c_kind_of(g, containerc);
+        if containerc != "" && c_elem_of(g, containerc) == "" {
+            var m: u8[>..] = [];
+            format(m, "IDX MISS: container=", containerc, " ccs:");
+            for i in g.ccs.len { format(m, " [", g.ccs[i], "|", g.ces[i], "]"); }
+            print(m);
+        }
+        if elemk == KRef {
+            let pointc = cat("", c_elem_of(g, elemc));
+            let pointk = c_kind_of(g, elemc);
+            var contk: i64 = 0;
+            if bk0 == KRef { contk = bek0; } else { contk = bk0; }
+            var dot: const u8[:] = ".";
+            if bk0 == KRef { dot = ""; }
+            var suffix: const u8[:] = "p[";
+            if contk == KFixed { suffix = "v["; }
+            return cat2(cat5(bp, dot, suffix, idx, "]"), ""), KRef, elemc, pointc, pointk;
+        }
+        if elemk == KFixed || elemk == KSlice || elemk == KStr || elemk == KGrow
+            || elemk == KInt || elemk == KBool || elemk == KFloat || elemk == KStruct
+            || elemk == KEnum {
+            var contk2: i64 = 0;
+            if bk0 == KRef { contk2 = bek0; } else { contk2 = bk0; }
+            var dot2: const u8[:] = ".";
+            if bk0 == KRef { dot2 = ""; }
+            var suffix2: const u8[:] = "p[";
+            if contk2 == KFixed { suffix2 = "v["; }
+            return cat2(cat5(bp, dot2, suffix2, idx, "]"), ""), elemk, elemc, "", 0;
+        }
+        fail(g, "indexing is not supported on this value", p, id);
+        return "", 0, "", "", 0;
+    }
+    fail(g, "unsupported place", p, id);
+    return "", 0, "", "", 0;
+}
+
+recursive fn expr_ty(g: Gen&, p: ast::Parser&, id: i64) -> const u8[:], i64, const u8[:], i64, i64 {
+    let vbase = g.vlen;
+    let ra, rb, rc, rd, re = expr_ty_inner(g, p, id);
+    g.vlen = vbase;
+    return ra, rb, rc, rd, re;
+}
+
+recursive fn expr_ty_inner(g: Gen&, p: ast::Parser&, id: i64) -> const u8[:], i64, const u8[:], i64, i64 {
+    guard g.ok else { return "", 0, "", 0, 0; }
+
+    var n .= p.nodes[id];
+    if n.k == ast::Nk.Int { return "long long", KInt, "", 0, 0; }
+    if n.k == ast::Nk.Float { return "double", KFloat, "", 0, 0; }
+    if n.k == ast::Nk.Str { return "_str", KStr, "unsigned char", KInt, 0; }
+    if n.k == ast::Nk.Name {
+        if n.text == "true" || n.text == "false" { return "bool", KBool, "", 0, 0; }
+        let vi = lookup_var(g, n.text);
+        if vi < 0 {
+            fail(g, cat3("unknown variable '", n.text, "'"), p, id);
+            return "", 0, "", 0, 0;
+        }
+        return cat("", var_c(g, vi)), var_k(g, vi), cat("", var_e(g, vi)), var_ek(g, vi), 0;
     }
     if n.k == ast::Nk.As {
         let ty = nth_child(p, id, 1);
-        return ctype_of(g, text_of(p, ty));
+        let tc, tk, te, tek, tn = ty_parse(g, p, ty, text_of(p, ty));
+        return tc, tk, te, tek, tn;
     }
     if n.k == ast::Nk.Call {
-        let callee = nth_child(p, id, 0);
+        let callee = n.first;
         var cn .= p.nodes[callee];
-        if cn.k == ast::Nk.Name { return lookup_ret(g, cn.text); }
-        return "";
+        if cn.k == ast::Nk.Name {
+            if cn.text == "args" {
+                let ac, ak, ae, aek, an = ty_parse(g, p, id, "const u8[:][>..]");
+                return ac, ak, ae, aek, an;
+            }
+            if cn.text == "str" {
+                return "_str", KStr, "unsigned char", KInt, 0;
+            }
+            let fnm = resolve_fn(g, cn.text);
+            let fi = fn_index(g, fnm);
+            guard fi >= 0 else {
+                fail(g, "call of an unknown function", p, id);
+                return "", 0, "", 0, 0;
+            }
+            var cs = cat("", g.frets[fi]);
+            if ret_count(g, fi) > 1 {
+                cs = ret_c_at(g, fi, 0);
+            }
+            let k0 = ret_kind_at(g, fi, 0);
+            let es = g.frelems[fi];
+            var e0: const u8[:] = "";
+            var ek0: i64 = 0;
+            var eseg: i64 = 0;
+            var stage: i64 = 0;
+            for i in es.len + 1 {
+                if i == es.len || es[i] == ',' {
+                    if stage == 0 { e0 = cat("", strip_ws(es[eseg..i])); }
+                    else { ek0 = num_val(es[eseg..i]); }
+                    stage++;
+                    eseg = i + 1;
+                }
+            }
+            return cs, k0, e0, ek0, 0;
+        }
+        fail(g, "call of an unsupported callee", p, id);
+        return "", 0, "", 0, 0;
+    }
+    if n.k == ast::Nk.Lit {
+        let nm = nth_child(p, id, 0);
+        var ln .= p.nodes[nm];
+        let sn = resolve_struct(g, ln.text);
+        guard sn != "" else {
+            fail(g, "unknown struct literal", p, id);
+            return "", 0, "", 0, 0;
+        }
+        return cat("", sn), KStruct, "", 0, 0;
+    }
+    if n.k == ast::Nk.Arr {
+        if child_count(p, id) == 0 {
+            fail(g, "cannot infer the type of an empty array literal", p, id);
+            return "", 0, "", 0, 0;
+        }
+        let ec, ek2, ee, eek, en = expr_ty(g, p, nth_child(p, id, 0));
+        guard g.ok else { return "", 0, "", 0, 0; }
+        let tn = cat4("_a_", tag_of(ec), "_", num_text(child_count(p, id)));
+        register_typedef(g, tn, cat6("typedef struct { ", ec, " v[", num_text(child_count(p, id)), "]; } ", cat2(tn, ";")));
+        return cat("", tn), KFixed, cat("", ec), ek2, child_count(p, id);
+    }
+    if n.k == ast::Nk.If {
+        let then = nth_child(p, id, 1);
+        guard p.nodes[then].k == ast::Nk.Block && child_count(p, then) == 1 else {
+            fail(g, "if expressions need a single expression per branch", p, id);
+            return "", 0, "", 0, 0;
+        }
+        let only = nth_child(p, then, 0);
+        var on .= p.nodes[only];
+        guard on.k == ast::Nk.Expr && (on.val & 1) != 0 else {
+            fail(g, "if expression branches need a tail expression", p, id);
+            return "", 0, "", 0, 0;
+        }
+        return expr_ty(g, p, nth_child(p, only, 0));
+    }
+    if n.k == ast::Nk.Index {
+        let idx0 = nth_child(p, id, 1);
+        if child_count(p, id) == 2 && p.nodes[idx0].k == ast::Nk.Range {
+            let bp0, bk0, bc0, be0, bek0 = gen_path(g, p, nth_child(p, id, 0));
+            guard g.ok else { return "", 0, "", 0, 0; }
+            var bc = bc0;
+            var bk = bk0;
+            var be = be0;
+            var bek = bek0;
+            if bk == KRef && (bek0 == KFixed || bek0 == KSlice || bek0 == KStr || bek0 == KGrow) {
+                bk = bek0;
+                bc = cat("", be0);
+                be = cat("", c_elem_of(g, be0));
+                bek = c_kind_of(g, be0);
+            }
+            let vc, vk = view_of(g, bc, bk);
+            guard g.ok else { return "", 0, "", 0, 0; }
+            return cat("", vc), vk, cat("", be), bek, 0;
+        }
+        let bp, bk, bc, be, bek = gen_path(g, p, id);
+        return cat("", bc), bk, cat("", be), bek, 0;
+    }
+    if n.k == ast::Nk.Field {
+        let bp, bk, bc, be, bek = gen_path(g, p, id);
+        return cat("", bc), bk, cat("", be), bek, 0;
     }
     if n.k == ast::Nk.Bin {
         var n2 .= p.nodes[id];
         if n2.op == ast::Op.Eq || n2.op == ast::Op.Ne || n2.op == ast::Op.Lt
             || n2.op == ast::Op.Le || n2.op == ast::Op.Gt || n2.op == ast::Op.Ge
-            || n2.op == ast::Op.Land || n2.op == ast::Op.Lor { return "bool"; }
-        let ty = expr_type(g, p, nth_child(p, id, 0));
-        if !g.ok { return ""; }
-        if ty == "" { return "long long"; }
-        return ty;
+            || n2.op == ast::Op.Land || n2.op == ast::Op.Lor {
+            return "bool", KBool, "", 0, 0;
+        }
+        let lc, lk, le, lek, ln = expr_ty(g, p, nth_child(p, id, 0));
+        guard g.ok else { return "", 0, "", 0, 0; }
+        return lc, lk, le, lek, ln;
     }
     if n.k == ast::Nk.Un {
-        let ty = expr_type(g, p, nth_child(p, id, 0));
-        if !g.ok { return ""; }
-        if ty == "" { return "long long"; }
-        return ty;
+        let c0, k0, e0, ek0, n0 = expr_ty(g, p, nth_child(p, id, 0));
+        guard g.ok else { return "", 0, "", 0, 0; }
+        return c0, k0, e0, ek0, n0;
     }
-    return "";
+    fail(g, "cannot infer the type of this expression", p, id);
+    return "", 0, "", 0, 0;
 }
 
-recursive fn gen_expr(g: Gen&, p: ast::Parser&, id: i64, out: u8[>..]&) {
-    guard g.ok else { return; }
+fn view_of(g: Gen&, c: const u8[:], k: i64) -> const u8[:], i64 {
+    if k == KSlice { return cat("", c), KSlice; }
+    if k == KStr { return "_str", KStr; }
+    if k == KFixed || k == KGrow {
+        let tn = cat("_s_", tag_of(c_elem_of(g, c)));
+        register_typedef(g, tn, cat5("typedef struct { ", c_elem_of(g, c), "* p; long long n; } ", tn, ";"));
+        return cat("", tn), KSlice;
+    }
+    return "", 0;
+}
+
+fn c_lit_esc(content: const u8[:]) -> const u8[:] {
+    let m = spool_n;
+    for i in content.len {
+        let c = content[i];
+        if c == '\\' { spool_put('\\'); spool_put('\\'); }
+        else if c == '"' { spool_put('\\'); spool_put('"'); }
+        else if c == '\n' { spool_put('\\'); spool_put('n'); }
+        else if c == '\t' { spool_put('\\'); spool_put('t'); }
+        else if c == '\r' { spool_put('\\'); spool_put('r'); }
+        else if c == 0 { spool_put('\\'); spool_put('0'); }
+        else if c < 32 || c >= 127 {
+            let h = (c as i64) >> 4;
+            let l = (c as i64) & 15;
+            spool_put('\\');
+            spool_put('x');
+            spool_put(if h < 10 { '0' + h as u8 } else { 'a' + (h - 10) as u8 });
+            spool_put(if l < 10 { '0' + l as u8 } else { 'a' + (l - 10) as u8 });
+        }
+        else { spool_put(c); }
+    }
+    return spool[m..spool_n];
+}
+
+fn gen_str_lit(g: Gen&, p: ast::Parser&, id: i64) -> const u8[:] {
+    var raw: u8[>..] = [];
+    ast::str_content(p.nodes[id].text, raw);
+    return cat5("(_str){ (const unsigned char*)\"", c_lit_esc(raw), "\", ", num_text(raw.len), " }");
+}
+
+
+fn block_tail_value(g: Gen&, p: ast::Parser&, blk: i64) -> const u8[:] {
+    guard p.nodes[blk].k == ast::Nk.Block && child_count(p, blk) == 1 else {
+        fail(g, "if expressions need a single expression per branch", p, blk);
+        return "";
+    }
+    let only = nth_child(p, blk, 0);
+    var on .= p.nodes[only];
+    guard on.k == ast::Nk.Expr && (on.val & 1) != 0 else {
+        fail(g, "if expression branches need a tail expression", p, blk);
+        return "";
+    }
+    return gen_expr(g, p, nth_child(p, only, 0), "", 0);
+}
+
+recursive fn gen_expr(g: Gen&, p: ast::Parser&, id: i64, dest: const u8[:], dkind: i64) -> const u8[:] {
+    guard g.ok else { return ""; }
     var n .= p.nodes[id];
     if n.k == ast::Nk.Int {
-        var m: u8[>..] = [];
-        format(m, n.val, "LL");
-        push_text(out, m);
-        return;
+        return cat(num_text(n.val), "LL");
+    }
+    if n.k == ast::Nk.Float {
+        return cat("", n.text);
+    }
+    if n.k == ast::Nk.Str {
+        return gen_str_lit(g, p, id);
     }
     if n.k == ast::Nk.Name {
-        if n.text == "true" { push_text(out, "true"); return; }
-        if n.text == "false" { push_text(out, "false"); return; }
-        let ty = lookup_type(g, n.text);
-        if ty == "" {
-            fail(g, "unknown variable or unsupported value", p, id);
-            return;
+        if n.text == "true" || n.text == "false" {
+            return cat("", n.text);
         }
-        if !is_int_type(ty) {
-            fail(g, "only integer values are supported yet", p, id);
-            return;
+        if n.text == "null" {
+            fail(g, "null is not supported yet", p, id);
+            return "";
         }
-        push_text(out, n.text);
-        return;
+        let pt, pk, pc, pe, pek = gen_path(g, p, id);
+        guard g.ok else { return ""; }
+        if pk == KRef {
+            return cat3("(*", pt, ")");
+        }
+        return pt;
+    }
+    if n.k == ast::Nk.As {
+        let c = nth_child(p, id, 0);
+        let ty = nth_child(p, id, 1);
+        let tc, tk, te, tek, tn = ty_parse(g, p, ty, text_of(p, ty));
+        guard g.ok else { return ""; }
+        let inner = gen_expr(g, p, c, tc, tk);
+        guard g.ok else { return ""; }
+        let m = spool_n;
+        spool_text("(");
+        spool_text(tc);
+        spool_text(")(");
+        spool_text(inner);
+        spool_text(")");
+        return spool[m..spool_n];
     }
     if n.k == ast::Nk.Bin {
+        if n.op == ast::Op.Range {
+            fail(g, "range is only supported in for and slicing", p, id);
+            return "";
+        }
         let l = nth_child(p, id, 0);
         let r = nth_child(p, id, 1);
-        out.push('(');
-        gen_expr(g, p, l, out);
+        let lc, lk, le, lek, ln = expr_ty(g, p, l);
+        guard g.ok else { return ""; }
+        if is_container(lk) || lk == KStruct {
+            if n.op != ast::Op.Eq && n.op != ast::Op.Ne {
+                fail(g, "only equality is supported on arrays and structs yet", p, id);
+                return "";
+            }
+            return gen_cmp(g, p, id, n.op == ast::Op.Ne);
+        }
         var op: const u8[:] = "";
         if n.op == ast::Op.Add { op = "+"; }
         else if n.op == ast::Op.Sub { op = "-"; }
@@ -226,297 +1594,1465 @@ recursive fn gen_expr(g: Gen&, p: ast::Parser&, id: i64, out: u8[>..]&) {
         else if n.op == ast::Op.Lor { op = "||"; }
         else {
             fail(g, "unsupported binary operator", p, id);
-            return;
+            return "";
         }
-        out.push(' ');
-        push_text(out, op);
-        out.push(' ');
-        gen_expr(g, p, r, out);
-        out.push(')');
-        return;
+        if n.op == ast::Op.Mod && lk == KFloat {
+            fail(g, "modulo on floats is not supported yet", p, id);
+            return "";
+        }
+        let lv = gen_expr(g, p, l, "", 0);
+        guard g.ok else { return ""; }
+        let rv = gen_expr(g, p, r, "", 0);
+        guard g.ok else { return ""; }
+        let m = spool_n;
+        spool_text("(");
+        spool_text(lv);
+        spool_text(" ");
+        spool_text(op);
+        spool_text(" ");
+        spool_text(rv);
+        spool_text(")");
+        return spool[m..spool_n];
     }
     if n.k == ast::Nk.Un {
         let c = nth_child(p, id, 0);
-        if n.op == ast::Op.Neg { push_text(out, "(-"); }
-        else if n.op == ast::Op.Not { push_text(out, "(!"); }
-        else if n.op == ast::Op.BitNot { push_text(out, "(~"); }
+        var pre: const u8[:] = "";
+        if n.op == ast::Op.Neg { pre = "(-"; }
+        else if n.op == ast::Op.Not { pre = "(!"; }
+        else if n.op == ast::Op.BitNot { pre = "(~"; }
         else {
             fail(g, "unsupported unary operator", p, id);
-            return;
+            return "";
         }
-        gen_expr(g, p, c, out);
-        out.push(')');
-        return;
+        let inner = gen_expr(g, p, c, "", 0);
+        guard g.ok else { return ""; }
+        return cat3(pre, inner, ")");
     }
-    if n.k == ast::Nk.As {
-        let c = nth_child(p, id, 0);
-        let ty = nth_child(p, id, 1);
-        let ct = ctype_of(g, text_of(p, ty));
-        if ct == "" {
-            fail(g, "unsupported cast target", p, id);
-            return;
+    if n.k == ast::Nk.If {
+        let cond = nth_child(p, id, 0);
+        let then = nth_child(p, id, 1);
+        let els = nth_child(p, id, 2);
+        guard els >= 0 else {
+            fail(g, "if expressions need an else branch", p, id);
+            return "";
         }
-        out.push('(');
-        push_text(out, ct);
-        push_text(out, ")(");
-        gen_expr(g, p, c, out);
-        out.push(')');
-        return;
+        let cv = gen_expr(g, p, cond, "", 0);
+        guard g.ok else { return ""; }
+        let tv = block_tail_value(g, p, then);
+        guard g.ok else { return ""; }
+        var ev: const u8[:] = "";
+        if p.nodes[els].k == ast::Nk.Block {
+            ev = block_tail_value(g, p, els);
+        } else {
+            ev = gen_expr(g, p, els, "", 0);
+        }
+        guard g.ok else { return ""; }
+        let m = spool_n;
+        spool_text("(");
+        spool_text(cv);
+        spool_text(" ? ");
+        spool_text(tv);
+        spool_text(" : ");
+        spool_text(ev);
+        spool_text(")");
+        return spool[m..spool_n];
+    }
+    if n.k == ast::Nk.Index {
+        return gen_slice_or_index(g, p, id, dest, dkind);
+    }
+    if n.k == ast::Nk.Field {
+        let pt, pk, pc, pe, pek = gen_path(g, p, id);
+        guard g.ok else { return ""; }
+        return pt;
+    }
+    if n.k == ast::Nk.Lit {
+        return gen_lit(g, p, id, dest, dkind);
+    }
+    if n.k == ast::Nk.Arr {
+        return gen_arr_lit(g, p, id, dest, dkind);
     }
     if n.k == ast::Nk.Call {
-        let callee = nth_child(p, id, 0);
-        var cn .= p.nodes[callee];
-        if cn.k != ast::Nk.Name {
-            fail(g, "only plain function calls are supported yet", p, id);
-            return;
-        }
-        if cn.text == "print" {
-            fail(g, "print is a statement, not an expression", p, id);
-            return;
-        }
-        if lookup_ret(g, cn.text) == "" {
-            fail(g, "call of an unknown or unsupported function", p, id);
-            return;
-        }
-        push_text(out, cn.text);
-        out.push('(');
-        var c = cn.next;
-        var first = true;
-        while c >= 0 {
-            if !first { push_text(out, ", "); }
-            first = false;
-            if p.nodes[c].k == ast::Nk.Raw {
-                fail(g, "generic calls are not supported yet", p, id);
-                return;
-            }
-            gen_expr(g, p, c, out);
-            c = p.nodes[c].next;
-        }
-        out.push(')');
-        return;
+        return gen_call(g, p, id, dest, dkind);
     }
     fail(g, "unsupported expression form", p, id);
+    return "";
 }
 
-recursive fn gen_str_part(g: Gen&, p: ast::Parser&, id: i64, fmt: u8[>..]&) {
-    var buf: u8[>..] = [];
-    ast::str_content(p.nodes[id].text, buf);
-    c_fmt_text(buf, fmt);
+recursive fn gen_value(g: Gen&, p: ast::Parser&, id: i64, dest: const u8[:], dkind: i64) -> const u8[:] {
+    if dest == "" {
+        return gen_expr(g, p, id, "", 0);
+    }
+    let vc, vk, ve, vek, vn = expr_ty(g, p, id);
+    guard g.ok else { return ""; }
+    var kn .= p.nodes[id];
+    if vk == KRef {
+        var ptr: const u8[:] = "";
+        if kn.k == ast::Nk.Name || kn.k == ast::Nk.Field || kn.k == ast::Nk.Index {
+            let bt2, bk2, bc2, be2, bek2 = gen_path(g, p, id);
+            guard g.ok else { return ""; }
+            ptr = bt2;
+        } else {
+            ptr = gen_expr(g, p, id, "", 0);
+            guard g.ok else { return ""; }
+        }
+        if dkind == KRef {
+            return ptr;
+        }
+        return cat3("(*", ptr, ")");
+    }
+    let raw = gen_expr(g, p, id, "", 0);
+    guard g.ok else { return ""; }
+    if kn.k == ast::Nk.Arr && (dkind == KFixed || dkind == KSlice || dkind == KStr) {
+        return gen_arr_lit(g, p, id, dest, dkind);
+    }
+    if vc == dest {
+        return raw;
+    }
+    if (dkind == KInt || dkind == KFloat || dkind == KBool || dkind == KEnum)
+        && (vk == KInt || vk == KFloat || vk == KBool || vk == KEnum) {
+        return raw;
+    }
+    if dkind == KSlice && vk == KFixed {
+        return cat5("(", dest, "){ .p = ", raw, cat3(".v, .n = ", num_text(c_size_of(g, vc)), " }"));
+    }
+    if dkind == KSlice && vk == KGrow {
+        return cat("(", cat4(dest, "){ .p = ", raw, cat3(".p, .n = ", raw, ".n }")));
+    }
+    if dkind == KStr && vk == KFixed {
+        return cat4("(_str){ .p = ", raw, cat3(".v, .n = ", num_text(c_size_of(g, vc)), " }"), "");
+    }
+    if dkind == KStr && (vk == KGrow || vk == KSlice) {
+        return cat4("(_str){ .p = ", raw, cat3(".p, .n = ", raw, ".n }"), "");
+    }
+    {
+        var m: u8[>..] = [];
+        format(m, "CONV FAIL line ", p.nodes[id].line, " kind=", ast::kind_name(p.nodes[id].k), " text=", p.nodes[id].text, " slot=", lookup_var(g, p.nodes[id].text), " vlen=", g.vlen, ": vc=", vc, " vk=", vk, " dest=", dest, " dkind=", dkind);
+        print(m);
+    }
+    fail(g, cat4("type mismatch in conversion: ", vc, " to ", dest), p, id);
+    return "";
 }
 
-fn is_str_call(p: ast::Parser&, id: i64) -> bool {
-    var cn .= p.nodes[id];
-    let callee = cn.first;
-    if callee < 0 { return false; }
-    var cc .= p.nodes[callee];
-    return cc.k == ast::Nk.Name && cc.text == "str";
+
+recursive fn gen_cmp(g: Gen&, p: ast::Parser&, id: i64, negate: bool) -> const u8[:] {
+    let l = nth_child(p, id, 0);
+    let r = nth_child(p, id, 1);
+    let lc, lk, le, lek, ln = expr_ty(g, p, l);
+    guard g.ok else { return ""; }
+    let rc, rk, re, rek, rn = expr_ty(g, p, r);
+    guard g.ok else { return ""; }
+    var lv: const u8[:] = "";
+    var rv: const u8[:] = "";
+    var hkey: const u8[:] = "";
+    if lk == KStruct || rk == KStruct {
+        guard lk == KStruct && rk == KStruct && lc == rc else {
+            fail(g, "cannot compare these values", p, id);
+            return "";
+        }
+        emit_eq_struct(g, p, lc);
+        guard g.ok else { return ""; }
+        lv = gen_value(g, p, l, lc, KStruct);
+        guard g.ok else { return ""; }
+        rv = gen_value(g, p, r, rc, KStruct);
+        guard g.ok else { return ""; }
+        hkey = cat3("_eq_", tag_of(lc), "(");
+    } else if lk == KStr && rk == KStr {
+        emit_eq_str(g);
+        guard g.ok else { return ""; }
+        lv = gen_value(g, p, l, "_str", KStr);
+        guard g.ok else { return ""; }
+        rv = gen_value(g, p, r, "_str", KStr);
+        guard g.ok else { return ""; }
+        hkey = "_eq_str(";
+    } else if is_container(lk) && is_container(rk) {
+        let lv2, lvk = view_of(g, lc, lk);
+        guard g.ok else { return ""; }
+        let rv2, rvk = view_of(g, rc, rk);
+        guard g.ok else { return ""; }
+        guard lv2 == rv2 else {
+            fail(g, "cannot compare different element types", p, id);
+            return "";
+        }
+        if lv2 == "_str" {
+            emit_eq_str(g);
+            hkey = "_eq_str(";
+        } else {
+            emit_eq_slice(g, p, lv2);
+            hkey = cat3("_eq_", tag_of(lv2), "_s(");
+        }
+        guard g.ok else { return ""; }
+        lv = gen_value(g, p, l, lv2, lvk);
+        guard g.ok else { return ""; }
+        rv = gen_value(g, p, r, rv2, rvk);
+        guard g.ok else { return ""; }
+    } else {
+        fail(g, "cannot compare these values", p, id);
+        return "";
+    }
+    let m = spool_n;
+    if negate { spool_text("(!"); } else { spool_text("("); }
+    spool_text(hkey);
+    spool_text(lv);
+    spool_text(", ");
+    spool_text(rv);
+    spool_text("))");
+    return spool[m..spool_n];
+}
+
+recursive fn gen_slice_or_index(g: Gen&, p: ast::Parser&, id: i64, dest: const u8[:], dkind: i64) -> const u8[:] {
+    var n .= p.nodes[id];
+    let idx1 = nth_child(p, id, 1);
+    if !(child_count(p, id) == 2 && p.nodes[idx1].k == ast::Nk.Range) {
+        let pt, pk, pc, pe, pek = gen_path(g, p, id);
+        guard g.ok else { return ""; }
+        return pt;
+    }
+    let bp0, bk0, bc0, be0, bek0 = gen_path(g, p, nth_child(p, id, 0));
+    guard g.ok else { return ""; }
+    var bp = bp0;
+    var bk = bk0;
+    var bc = bc0;
+    if bk == KRef && (bek0 == KFixed || bek0 == KSlice || bek0 == KStr || bek0 == KGrow) {
+        bk = bek0;
+        bc = cat("", be0);
+    }
+    guard bk == KFixed || bk == KSlice || bk == KStr || bk == KGrow else {
+        fail(g, "slicing is not supported on this value", p, id);
+        return "";
+    }
+    var blen: const u8[:] = "";
+    if bk0 == KRef {
+        if bk == KFixed {
+            blen = num_text(c_size_of(g, bc));
+        } else {
+            blen = cat3("(", bp0, "->n)");
+        }
+    } else {
+        if bk == KFixed {
+            blen = num_text(c_size_of(g, bc));
+        } else {
+            blen = cat3("(", bp, ".n)");
+        }
+    }
+    guard g.ok else { return ""; }
+    var rlo = nth_child(p, idx1, 0);
+    var rhi = nth_child(p, idx1, 1);
+    if rhi < 0 && rlo >= 0 && (p.nodes[idx1].val & 1) != 0 {
+        rhi = rlo;
+        rlo = -1;
+    }
+    var lo: const u8[:] = "";
+    if rlo >= 0 {
+        let lt = gen_expr(g, p, rlo, "long long", KInt);
+        guard g.ok else { return ""; }
+        if n.val & 1 != 0 {
+            lo = cat("(", cat4(blen, ") - (", lt, ")"));
+        } else {
+            lo = cat("", lt);
+        }
+    } else {
+        lo = "0";
+    }
+    var hi: const u8[:] = "";
+    if rhi >= 0 {
+        let ht = gen_expr(g, p, rhi, "long long", KInt);
+        guard g.ok else { return ""; }
+        if n.val & 2 != 0 {
+            hi = cat("(", cat4(blen, ") - (", ht, ")"));
+        } else {
+            hi = cat("", ht);
+        }
+    } else {
+        hi = cat("", blen);
+    }
+    var vc: const u8[:] = "";
+    if bk == KStr {
+        vc = "_str";
+    } else {
+        let v2, vk2 = view_of(g, bc, bk);
+        guard g.ok else { return ""; }
+        vc = cat("", v2);
+    }
+    var mid: const u8[:] = ").p + ";
+    if bk == KFixed { mid = ").v + "; }
+    if bk0 == KRef {
+        if bk == KFixed { mid = "->v + "; } else { mid = "->p + "; }
+    }
+    let m = spool_n;
+    spool_text("(");
+    spool_text(vc);
+    spool_text("){ .p = ");
+    if bk0 == KRef {
+        spool_text(bp0);
+        spool_text(mid);
+    } else {
+        spool_text("(");
+        spool_text(bp);
+        spool_text(mid);
+    }
+    spool_text(lo);
+    spool_text(", .n = ");
+    spool_text(hi);
+    spool_text(" - ");
+    spool_text(lo);
+    spool_text(" }");
+    return spool[m..spool_n];
+}
+
+recursive fn gen_field_default(g: Gen&, p: ast::Parser&, dflt: i64, fc: const u8[:], fk: i64) -> const u8[:] {
+    var dn .= p.nodes[dflt];
+    if dn.k == ast::Nk.Arr && child_count(p, dflt) == 0 && fk == KGrow {
+        return "{ 0, 0, 0 }";
+    }
+    return gen_expr(g, p, dflt, fc, fk);
+}
+
+recursive fn gen_lit(g: Gen&, p: ast::Parser&, id: i64, dest: const u8[:], dkind: i64) -> const u8[:] {
+    var n .= p.nodes[id];
+    let nm = nth_child(p, id, 0);
+    var ln .= p.nodes[nm];
+    let sn = resolve_struct(g, ln.text);
+    guard sn != "" else {
+        fail(g, "unknown struct literal", p, id);
+        return "";
+    }
+    let sid = struct_sid(g, sn);
+    guard sid >= 0 else {
+        fail(g, "unknown struct literal", p, id);
+        return "";
+    }
+    let dpi = struct_pi(g, sid);
+    guard dpi >= 0 else {
+        fail(g, "unknown struct literal", p, id);
+        return "";
+    }
+    let dp = g.sps[dpi];
+    var positional = false;
+    if child_count(p, id) > 1 {
+        let f0 = nth_child(p, id, 1);
+        if p.nodes[f0].text == "" { positional = true; }
+    }
+    guard child_count(dp, sid) <= 64 else {
+        fail(g, "struct literals of more than 64 fields are not supported yet", p, id);
+        return "";
+    }
+    var vals: const u8[:][64];
+    var nv: i64 = 0;
+    var fi: i64 = 0;
+    var emitted = false;
+    var fnode = dp.nodes[sid].first;
+    while fnode >= 0 {
+        let fn_, ty = field_split(dp.nodes[fnode].text);
+        let fc, fk, fe, fek, fn2 = ty_parse(g, p, fnode, ty);
+        guard g.ok else { return ""; }
+        var given: i64 = -1;
+        var gi: i64 = 0;
+        var gnode = nth_child(p, id, 1);
+        while gnode >= 0 {
+            if positional {
+                if gi == fi { given = gnode; }
+            } else {
+                if p.nodes[gnode].text == fn_ { given = gnode; }
+            }
+            gi++;
+            gnode = p.nodes[gnode].next;
+        }
+        var emit_field = false;
+        if given >= 0 { emit_field = true; }
+        else {
+            let dflt = nth_child(dp, fnode, 0);
+            if dflt >= 0 { emit_field = true; }
+        }
+        if emit_field {
+            var piece: const u8[:] = "";
+            if given >= 0 {
+                let gv = nth_child(p, given, 0);
+                piece = gen_value(g, p, gv, fc, fk);
+                guard g.ok else { return ""; }
+            } else {
+                let dflt = nth_child(dp, fnode, 0);
+                piece = gen_field_default(g, dp, dflt, fc, fk);
+                guard g.ok else { return ""; }
+            }
+            var pref: const u8[:] = "";
+            if !positional { pref = cat3(".", fn_, " = "); }
+            if emitted { pref = cat3(", ", pref, ""); }
+            vals[nv] = cat(pref, piece);
+            nv++;
+            emitted = true;
+        }
+        fi++;
+        fnode = dp.nodes[fnode].next;
+    }
+    let m = spool_n;
+    spool_text("(");
+    spool_text(sn);
+    spool_text("){ ");
+    for i in nv { spool_text(vals[i]); }
+    spool_text(" }");
+    return spool[m..spool_n];
+}
+
+recursive fn gen_arr_lit(g: Gen&, p: ast::Parser&, id: i64, dest: const u8[:], dkind: i64) -> const u8[:] {
+    var n .= p.nodes[id];
+    var cnt = child_count(p, id);
+    var tn: const u8[:] = "";
+    var ek: i64 = 0;
+    if dkind == KGrow {
+        fail(g, "construct growable arrays from a typed variable", p, id);
+        return "";
+    }
+    if dkind == KFixed || dkind == KSlice || dkind == KStr {
+        tn = cat("", dest);
+        ek = c_kind_of(g, dest);
+    } else {
+        guard cnt > 0 else {
+            fail(g, "cannot infer the type of an empty array literal", p, id);
+            return "";
+        }
+        let ec, ek2, ee, eek, en = expr_ty(g, p, nth_child(p, id, 0));
+        guard g.ok else { return ""; }
+        tn = cat4("_a_", tag_of(ec), "_", num_text(cnt));
+        register_typedef(g, tn, cat("typedef struct { ", cat6(ec, " v[", num_text(cnt), "]; } ", tn, ";")));
+        ek = ek2;
+    }
+    guard cnt <= 64 else {
+        fail(g, "array literals of more than 64 elements are not supported yet", p, id);
+        return "";
+    }
+    let elem = c_elem_of(g, tn);
+    var items: const u8[:][64];
+    var ni: i64 = 0;
+    var c = n.first;
+    while c >= 0 {
+        let piece = gen_value(g, p, c, elem, ek);
+        guard g.ok else { return ""; }
+        items[ni] = piece;
+        ni++;
+        c = p.nodes[c].next;
+    }
+    let cnttxt = num_text(cnt);
+    let m = spool_n;
+    if dkind == KSlice || dkind == KStr {
+        spool_text("(");
+        spool_text(tn);
+        spool_text("){ .p = (");
+        spool_text(elem);
+        spool_text("[]){ ");
+        for i in ni {
+            if i > 0 { spool_text(", "); }
+            spool_text(items[i]);
+        }
+        spool_text(" }, .n = ");
+        spool_text(cnttxt);
+        spool_text(" }");
+    } else {
+        spool_text("(");
+        spool_text(tn);
+        spool_text("){ .v = { ");
+        for i in ni {
+            if i > 0 { spool_text(", "); }
+            spool_text(items[i]);
+        }
+        spool_text(" } }");
+    }
+    return spool[m..spool_n];
+}
+
+recursive fn gen_str_call(g: Gen&, p: ast::Parser&, id: i64) -> const u8[:] {
+    var n .= p.nodes[id];
+    var c = n.first;
+    c = p.nodes[c].next;
+    var argc: i64 = 0;
+    var walker = c;
+    while walker >= 0 { argc++; walker = p.nodes[walker].next; }
+    guard argc > 0 else {
+        fail(g, "str needs arguments", p, id);
+        return "";
+    }
+    emit_str_helpers(g);
+    guard g.ok else { return ""; }
+    guard argc <= 16 else {
+        fail(g, "str with more than 16 arguments is not supported yet", p, id);
+        return "";
+    }
+    var parts: const u8[:][16];
+    var np2: i64 = 0;
+    var i: i64 = 0;
+    while c >= 0 {
+        let vc, vk, ve, vek, vn = expr_ty(g, p, c);
+        guard g.ok else { return ""; }
+        var piece: const u8[:] = "";
+        if vk == KInt {
+            if unsigned_ctype(vc) {
+                piece = cat3("_b_str_u64(", gen_expr(g, p, c, "", 0), ")");
+            } else {
+                piece = cat3("_b_str_i64(", gen_expr(g, p, c, "", 0), ")");
+            }
+        } else if vk == KBool {
+            piece = cat3("_b_str_bool(", gen_expr(g, p, c, "", 0), ")");
+        } else if vk == KStr {
+            piece = gen_value(g, p, c, "_str", KStr);
+        } else {
+            fail(g, "str supports integers, bools and strings only yet", p, id);
+            return "";
+        }
+        guard g.ok else { return ""; }
+        parts[np2] = piece;
+        np2++;
+        i++;
+        c = p.nodes[c].next;
+    }
+    let m = spool_n;
+    for i2 in np2 {
+        if i2 > 0 { spool_text("_b_str_cat("); }
+        spool_text(parts[i2]);
+        if i2 < np2 - 1 { spool_text(", "); }
+    }
+    var close: i64 = 0;
+    while close < np2 - 1 {
+        spool_text(")");
+        close++;
+    }
+    return spool[m..spool_n];
+}
+
+
+recursive fn gen_call(g: Gen&, p: ast::Parser&, id: i64, dest: const u8[:], dkind: i64) -> const u8[:] {
+
+    var n .= p.nodes[id];
+    let callee = n.first;
+    var cn .= p.nodes[callee];
+    if cn.k == ast::Nk.Field {
+        return gen_method(g, p, id, dest, dkind);
+    }
+    guard cn.k == ast::Nk.Name else {
+        fail(g, "only plain function calls are supported yet", p, id);
+        return "";
+    }
+    if cn.text == "print" {
+        fail(g, "print is a statement, not an expression", p, id);
+        return "";
+    }
+    if cn.text == "str" {
+        return gen_str_call(g, p, id);
+    }
+    if cn.text == "args" {
+        let ac, ak, ae, aek, an = ty_parse(g, p, id, "const u8[:][>..]");
+        guard g.ok else { return ""; }
+        if need_helper(g, "globals_args") {
+            emit_grow_push(g, "_str");
+            guard g.ok else { return ""; }
+            emit_hdr(g, "static _g_str __cgen_args;\n\n");
+        }
+        return "__cgen_args";
+    }
+    if cn.text == "read_file" {
+        let a0 = nth_child(p, id, 1);
+        let a1 = nth_child(p, id, 2);
+        guard a0 >= 0 && a1 >= 0 else {
+            fail(g, "read_file needs a path and a buffer", p, id);
+            return "";
+        }
+        emit_os(g);
+        guard g.ok else { return ""; }
+        let pv = gen_value(g, p, a0, "_str", KStr);
+        guard g.ok else { return ""; }
+        let bt, bk, bc, be, bek = gen_path(g, p, a1);
+        guard g.ok else { return ""; }
+        guard bk == KGrow && bc == "_g_u8" else {
+            fail(g, "read_file needs a u8[>..] buffer", p, id);
+            return "";
+        }
+        return cat5("_b_read_file(", pv, ", &", bt, ")");
+    }
+    if cn.text == "write_file" {
+        let a0 = nth_child(p, id, 1);
+        let a1 = nth_child(p, id, 2);
+        guard a0 >= 0 && a1 >= 0 else {
+            fail(g, "write_file needs a path and data", p, id);
+            return "";
+        }
+        emit_os(g);
+        guard g.ok else { return ""; }
+        let pv = gen_value(g, p, a0, "_str", KStr);
+        guard g.ok else { return ""; }
+        let dv = gen_value(g, p, a1, "_str", KStr);
+        guard g.ok else { return ""; }
+        return cat("_b_write_file(", cat4(pv, ", ", dv, ")"));
+    }
+    let fnm = resolve_fn(g, cn.text);
+    let fi = fn_index(g, fnm);
+    guard fi >= 0 else {
+        fail(g, cat3("call of an unknown function '", cn.text, "'"), p, id);
+        return "";
+    }
+    let rc = ret_count(g, fi);
+    guard child_count(p, id) - 1 <= 16 else {
+        fail(g, "calls with more than 16 arguments are not supported yet", p, id);
+        return "";
+    }
+    var args: const u8[:][16];
+    var na: i64 = 0;
+    var c = cn.next;
+    var ai2: i64 = 0;
+    var outer_ctx: bool = g.tuple_ctx;
+    g.tuple_ctx = false;
+    while c >= 0 {
+        if p.nodes[c].k == ast::Nk.Raw {
+            fail(g, "generic calls are not supported yet", p, id);
+            return "";
+        }
+        let pc, pk = param_ty_at(g, fi, ai2);
+        var piece: const u8[:] = "";
+        if pk == KRef {
+            let bt, bk, bc, be, bek = gen_path(g, p, c);
+            guard g.ok else { return ""; }
+            if bk == KRef {
+                piece = cat("", bt);
+            } else {
+                piece = cat2("&", bt);
+            }
+        } else {
+            piece = gen_value(g, p, c, pc, pk);
+            guard g.ok else { return ""; }
+        }
+        args[na] = piece;
+        na++;
+        ai2++;
+        c = p.nodes[c].next;
+    }
+    g.tuple_ctx = outer_ctx;
+    let m = spool_n;
+    spool_text(fnm);
+    spool_text("(");
+    for i in na {
+        if i > 0 { spool_text(", "); }
+        spool_text(args[i]);
+    }
+    spool_text(")");
+    if rc > 1 && !g.tuple_ctx { spool_text(".a"); }
+    return spool[m..spool_n];
+}
+
+recursive fn gen_method(g: Gen&, p: ast::Parser&, id: i64, dest: const u8[:], dkind: i64) -> const u8[:] {
+    var n .= p.nodes[id];
+    let callee = n.first;
+    let base_id = nth_child(p, callee, 0);
+    let bpath0, bkind0, bcty0, bel0, bek0 = gen_path(g, p, base_id);
+    guard g.ok else { return ""; }
+    var bpath = bpath0;
+    var bkind = bkind0;
+    var bel = bel0;
+    var bek = bek0;
+    if bkind == KRef && (bek0 == KGrow || bek0 == KSlice) {
+        bkind = bek0;
+        bel = cat("", c_elem_of(g, bel0));
+        bek = c_kind_of(g, bel0);
+    }
+    let method = p.nodes[callee].text;
+    if bkind == KGrow && method == "push" {
+        let a0 = nth_child(p, id, 1);
+        guard a0 >= 0 else {
+            fail(g, "push needs a value", p, id);
+            return "";
+        }
+        emit_grow_push(g, bel);
+        guard g.ok else { return ""; }
+        let pv = gen_value(g, p, a0, bel, bek);
+        guard g.ok else { return ""; }
+        if bkind0 == KRef {
+            return cat5(cat3("_g_push_", tag_of(bel), "("), bpath, ", ", pv, ")");
+        }
+        return cat5(cat3("_g_push_", tag_of(bel), "(&"), bpath, ", ", pv, ")");
+    }
+    if bkind == KGrow && method == "pop" {
+        emit_grow_pop(g, bel);
+        guard g.ok else { return ""; }
+        if bkind0 == KRef {
+            return cat4(cat3("_g_pop_", tag_of(bel), "("), bpath, ")", "");
+        }
+        return cat4(cat3("_g_pop_", tag_of(bel), "(&"), bpath, ")", "");
+    }
+    if bkind == KGrow && method == "append" {
+        let a0 = nth_child(p, id, 1);
+        guard a0 >= 0 else {
+            fail(g, "append needs a source", p, id);
+            return "";
+        }
+        let vc, vk, ve, vek, vn = expr_ty(g, p, a0);
+        guard g.ok else { return ""; }
+        var sfx: const u8[:] = "_s";
+        var view: const u8[:] = "";
+        if vk == KStr {
+            sfx = "_str";
+            view = "_str";
+        } else {
+            let v2, vk2 = view_of(g, vc, vk);
+            guard g.ok else { return ""; }
+            view = cat("", v2);
+        }
+        emit_grow_append(g, bel, view, sfx);
+        guard g.ok else { return ""; }
+        let av = gen_value(g, p, a0, view, if vk == KStr { KStr } else { KSlice });
+        guard g.ok else { return ""; }
+        var amp: const u8[:] = "(&";
+        if bkind0 == KRef { amp = "("; }
+        return cat6(cat5("_g_append_", tag_of(bel), sfx, amp, ""), bpath, ", ", av, ")", "");
+    }
+    let fnm = resolve_fn(g, method);
+    let fi = fn_index(g, fnm);
+    guard fi >= 0 else {
+        fail(g, cat3("unknown member '", method, "'"), p, id);
+        return "";
+    }
+    let pc, pk = param_ty_at(g, fi, 0);
+    let bval = gen_value(g, p, base_id, pc, pk);
+    guard g.ok else { return ""; }
+    guard child_count(p, callee) <= 16 else {
+        fail(g, "calls with more than 16 arguments are not supported yet", p, id);
+        return "";
+    }
+    var args: const u8[:][16];
+    var na: i64 = 0;
+    args[na] = bval;
+    na++;
+    var c = p.nodes[callee].next;
+    var ai2: i64 = 1;
+    var outer_ctx: bool = g.tuple_ctx;
+    g.tuple_ctx = false;
+    while c >= 0 {
+        if p.nodes[c].k == ast::Nk.Raw {
+            fail(g, "generic calls are not supported yet", p, id);
+            return "";
+        }
+        let pc2, pk2 = param_ty_at(g, fi, ai2);
+        var piece: const u8[:] = "";
+        if pk2 == KRef {
+            let bt, bk, bc, be, bek = gen_path(g, p, c);
+            guard g.ok else { return ""; }
+            if bk == KRef {
+                piece = cat("", bt);
+            } else {
+                piece = cat2("&", bt);
+            }
+        } else {
+            piece = gen_value(g, p, c, pc2, pk2);
+            guard g.ok else { return ""; }
+        }
+        args[na] = piece;
+        na++;
+        ai2++;
+        c = p.nodes[c].next;
+    }
+    g.tuple_ctx = outer_ctx;
+    let m = spool_n;
+    spool_text(fnm);
+    spool_text("(");
+    for i in na {
+        if i > 0 { spool_text(", "); }
+        spool_text(args[i]);
+    }
+    spool_text(")");
+    let rc = ret_count(g, fi);
+    if rc > 1 && !g.tuple_ctx { spool_text(".a"); }
+    return spool[m..spool_n];
+}
+
+
+fn emit_grow_push(g: Gen&, elem: const u8[:]) {
+    let key = cat("_g_push_", tag_of(elem));
+    guard need_helper(g, key) else { return; }
+    emit_aux(g, cat6("static ", elem, "* ", key, "(_g_", tag_of(elem)));
+    emit_aux(g, cat3("* a, ", elem, " v) { if (a->n >= a->c) { a->c = a->c ? a->c * 2 : 8; a->p = ("));
+    emit_aux(g, cat4(elem, "*)realloc(a->p, a->c * sizeof(", elem, ")); } a->p[a->n] = v; a->n++; return &a->p[a->n - 1]; }\n\n"));
+}
+
+fn emit_grow_pop(g: Gen&, elem: const u8[:]) {
+    let key = cat("_g_pop_", tag_of(elem));
+    guard need_helper(g, key) else { return; }
+    emit_aux(g, cat5("static ", elem, " ", key, "(_g_"));
+    emit_aux(g, cat2(tag_of(elem), "* a) { if (a->n == 0) { fprintf(stderr, \"pop on empty array\\n\"); exit(1); } a->n--; return a->p[a->n]; }\n\n"));
+}
+
+fn emit_grow_append(g: Gen&, elem: const u8[:], view: const u8[:], sfx: const u8[:]) {
+    let key = cat3("_g_append_", tag_of(elem), sfx);
+    guard need_helper(g, key) else { return; }
+    emit_grow_push(g, elem);
+    emit_aux(g, cat5("static void ", key, "(_g_", tag_of(elem), "* a, "));
+    emit_aux(g, cat4(view, " s) { for (long long i = 0; i < s.n; i++) { _g_push_", tag_of(elem), "(a, s.p[i]); } }\n\n"));
+}
+
+fn emit_grow_assign(g: Gen&, elem: const u8[:]) {
+    let key = cat("_g_assign_", tag_of(elem));
+    guard need_helper(g, key) else { return; }
+    emit_grow_push(g, elem);
+    emit_aux(g, cat5("static void ", key, "(_g_", tag_of(elem), "* d, _g_"));
+    emit_aux(g, cat2(tag_of(elem), "* s) { d->n = 0; for (long long i = 0; i < s->n; i++) { _g_push_"));
+    emit_aux(g, cat2(tag_of(elem), "(d, s->p[i]); } }\n\n"));
+}
+
+fn emit_pool(g: Gen&) {
+    guard need_helper(g, "pool") else { return; }
+    emit_aux(g, "static unsigned char __cgen_pool[4194304];\nstatic long long __cgen_pool_n = 0;\n\n");
+}
+
+fn emit_os(g: Gen&) {
+    guard need_helper(g, "os") else { return; }
+    emit_aux(g, "static bool _b_read_file(_str path, _g_u8* out) {\n");
+    emit_aux(g, "    FILE* f = fopen((const char*)path.p, \"rb\");\n");
+    emit_aux(g, "    if (!f) { return false; }\n");
+    emit_aux(g, "    fseek(f, 0, SEEK_END);\n");
+    emit_aux(g, "    long long sz = ftell(f);\n");
+    emit_aux(g, "    fseek(f, 0, SEEK_SET);\n");
+    emit_aux(g, "    if (sz < 0) { fclose(f); return false; }\n");
+    emit_aux(g, "    if (out->n + sz > out->c) {\n");
+    emit_aux(g, "        out->c = out->n + sz;\n");
+    emit_aux(g, "        out->p = (unsigned char*)realloc(out->p, out->c);\n");
+    emit_aux(g, "        if (!out->p) { fclose(f); return false; }\n");
+    emit_aux(g, "    }\n");
+    emit_aux(g, "    size_t got = fread(out->p + out->n, 1, sz, f);\n");
+    emit_aux(g, "    out->n += (long long)got;\n");
+    emit_aux(g, "    fclose(f);\n");
+    emit_aux(g, "    return true;\n}\n\n");
+    emit_aux(g, "static bool _b_write_file(_str path, _str data) {\n");
+    emit_aux(g, "    FILE* f = fopen((const char*)path.p, \"wb\");\n");
+    emit_aux(g, "    if (!f) { return false; }\n");
+    emit_aux(g, "    fwrite(data.p, 1, data.n, f);\n");
+    emit_aux(g, "    fclose(f);\n");
+    emit_aux(g, "    return true;\n}\n\n");
+}
+
+fn emit_prb(g: Gen&) {
+    guard need_helper(g, "_prb") else { return; }
+    emit_aux(g, "static void _prb(const unsigned char* p, long long n) { fwrite(p, 1, n, stdout); }\n\n");
+}
+
+fn emit_str_helpers(g: Gen&) {
+    emit_pool(g);
+    guard need_helper(g, "_b_str") else { return; }
+    emit_aux(g, "static _str _b_str_i64(long long v) { _str r; r.p = __cgen_pool + __cgen_pool_n; r.n = snprintf((char*)r.p, 32, \"%lld\", v); __cgen_pool_n += r.n; return r; }\n");
+    emit_aux(g, "static _str _b_str_u64(unsigned long long v) { _str r; r.p = __cgen_pool + __cgen_pool_n; r.n = snprintf((char*)r.p, 32, \"%llu\", v); __cgen_pool_n += r.n; return r; }\n");
+    emit_aux(g, "static _str _b_str_bool(bool v) { _str r; r.p = (const unsigned char*)(v ? \"true\" : \"false\"); r.n = v ? 4 : 5; return r; }\n");
+    emit_aux(g, "static _str _b_str_cat(_str a, _str b) { _str r; r.p = __cgen_pool + __cgen_pool_n; memcpy(r.p, a.p, a.n); memcpy(r.p + a.n, b.p, b.n); r.n = a.n + b.n; __cgen_pool_n += r.n; return r; }\n\n");
+}
+
+fn emit_eq_str(g: Gen&) {
+    guard need_helper(g, "_eq_str") else { return; }
+    register_typedef(g, "_str", "typedef struct { const unsigned char* p; long long n; } _str;");
+    emit_aux(g, "static bool _eq_str(_str a, _str b) { if (a.n != b.n) { return false; } return a.n == 0 || memcmp(a.p, b.p, a.n) == 0; }\n\n");
+}
+
+recursive fn emit_eq_struct(g: Gen&, p: ast::Parser&, cname: const u8[:]) {
+    let key = cat("_eq_", tag_of(cname));
+    guard need_helper(g, key) else { return; }
+    let sid = struct_sid(g, cname);
+    guard sid >= 0 else {
+        fail(g, "unknown struct", p, sid);
+        return;
+    }
+    let dpi = struct_pi(g, sid);
+    guard dpi >= 0 else {
+        fail(g, "unknown struct", p, sid);
+        return;
+    }
+    let dp = g.sps[dpi];
+    emit_aux(g, cat5("static bool ", key, "(", cname, " a, "));
+    emit_aux(g, cat3(cname, " b) { return ", ""));
+    var f = dp.nodes[sid].first;
+    var fi: i64 = 0;
+    while f >= 0 {
+        let fn_, ty = field_split(dp.nodes[f].text);
+        let fc, fk, fe, fek, fn2 = ty_parse(g, p, f, ty);
+        guard g.ok else { return; }
+        if fi > 0 { emit_aux(g, " && "); }
+        if fk == KStr {
+            emit_eq_str(g);
+            emit_aux(g, cat5("_eq_str(a.", fn_, ", b.", fn_, ")"));
+        } else if fk == KStruct {
+            emit_eq_struct(g, p, fc);
+            emit_aux(g, cat5("_eq_", tag_of(fc), "(a.", fn_, ", b."));
+            emit_aux(g, cat3(fn_, ")", ""));
+        } else if fk == KSlice {
+            emit_aux(g, cat5("(a.", fn_, ".p == b.", fn_, ".p"));
+            emit_aux(g, cat5(" && a.", fn_, ".n == b.", fn_, ".n)"));
+        } else {
+            emit_aux(g, cat5("a.", fn_, " == b.", fn_, ""));
+        }
+        fi++;
+        f = dp.nodes[f].next;
+    }
+    if fi == 0 { emit_aux(g, "true"); }
+    emit_aux(g, "; }\n\n");
+}
+
+fn emit_eq_slice(g: Gen&, p: ast::Parser&, view: const u8[:]) {
+    let key = cat3("_eq_", tag_of(view), "_s");
+    guard need_helper(g, key) else { return; }
+    let elem = c_elem_of(g, view);
+    let ek = c_kind_of(g, view);
+    emit_aux(g, cat5("static bool ", key, "(", view, " a, "));
+    emit_aux(g, cat2(view, " b) { if (a.n != b.n) { return false; } for (long long i = 0; i < a.n; i++) { "));
+    if ek == KStruct {
+        emit_eq_struct(g, p, elem);
+        emit_aux(g, cat3("if (!_eq_", tag_of(elem), "(a.p[i], b.p[i])) { return false; } } return true; }\n\n"));
+    } else {
+        emit_aux(g, "if (a.p[i] != b.p[i]) { return false; } } return true; }\n\n");
+    }
+}
+
+recursive fn emit_pr_struct(g: Gen&, p: ast::Parser&, cname: const u8[:]) {
+    let key = cat("_pr_", tag_of(cname));
+    guard need_helper(g, key) else { return; }
+    let sid = struct_sid(g, cname);
+    guard sid >= 0 else {
+        fail(g, "unknown struct", p, sid);
+        return;
+    }
+    let pi = struct_pi(g, sid);
+    guard pi >= 0 else {
+        fail(g, "unknown struct", p, sid);
+        return;
+    }
+    let dp = g.sps[pi];
+    emit_aux(g, cat5("static void ", key, "(", cname, " v) {\n"));
+    emit_aux(g, cat4("    printf(\"", tag_of(cname), " {\");\n", ""));
+    emit_aux(g, "    long long _fi = 0;\n");
+    var f = dp.nodes[sid].first;
+    while f >= 0 {
+        let fn_, ty = field_split(dp.nodes[f].text);
+        let fc, fk, fe, fek, fn2 = ty_parse(g, p, f, ty);
+        guard g.ok else { return; }
+        emit_aux(g, "    if (_fi > 0) { printf(\", \"); } else { printf(\" \"); } _fi++;\n");
+        if fk == KInt {
+            if unsigned_ctype(fc) {
+                emit_aux(g, cat4("    printf(\"%llu\", v.", fn_, ");\n", ""));
+            } else {
+                emit_aux(g, cat4("    printf(\"%lld\", v.", fn_, ");\n", ""));
+            }
+        } else if fk == KBool {
+            emit_aux(g, cat4("    printf(v.", fn_, " ? \"true\" : \"false\");\n", ""));
+        } else if fk == KStr {
+            emit_aux(g, "    printf(\"\\\"\");\n");
+            emit_aux(g, cat5("    fwrite(v.", fn_, ".p, 1, v.", fn_, ".n, stdout);\n"));
+            emit_aux(g, "    printf(\"\\\"\");\n");
+        } else if fk == KStruct {
+            emit_pr_struct(g, p, fc);
+            emit_aux(g, cat6("    _pr_", tag_of(fc), "(v.", fn_, ");\n", ""));
+        } else {
+            fail(g, "this struct cannot be printed yet", p, sid);
+            return;
+        }
+        f = dp.nodes[f].next;
+    }
+    emit_aux(g, "    printf(\" }\");\n}\n\n");
+}
+
+fn emit_pr_slice(g: Gen&, p: ast::Parser&, view: const u8[:]) {
+    let key = cat3("_pr_", tag_of(view), "_s");
+    guard need_helper(g, key) else { return; }
+    let elem = c_elem_of(g, view);
+    let ek = c_kind_of(g, view);
+    emit_prb(g);
+    if elem == "unsigned char" {
+        emit_aux(g, cat5("static void ", key, "(", view, " s) { _prb((const unsigned char*)s.p, s.n); }\n\n"));
+        return;
+    }
+    emit_aux(g, cat5("static void ", key, "(", view, " s) {\n"));
+    emit_aux(g, "    printf(\"[\");\n    for (long long i = 0; i < s.n; i++) {\n");
+    emit_aux(g, "        if (i > 0) { printf(\", \"); }\n");
+    if ek == KStruct {
+        emit_pr_struct(g, p, elem);
+        emit_aux(g, cat4("        _pr_", tag_of(elem), "(s.p[i]);\n", ""));
+    } else if ek == KStr {
+        emit_aux(g, "        printf(\"\\\"\");\n        _prb(s.p[i].p, s.p[i].n);\n        printf(\"\\\"\");\n");
+    } else if ek == KBool {
+        emit_aux(g, "        printf(s.p[i] ? \"true\" : \"false\");\n");
+    } else {
+        if unsigned_ctype(elem) {
+            emit_aux(g, "        printf(\"%llu\", s.p[i]);\n");
+        } else {
+            emit_aux(g, "        printf(\"%lld\", s.p[i]);\n");
+        }
+    }
+    emit_aux(g, "    }\n    printf(\"]\");\n}\n\n");
+}
+
+fn emit_pr_grow(g: Gen&, p: ast::Parser&, c: const u8[:]) {
+    let key = cat3("_pr_", tag_of(c), "_g");
+    guard need_helper(g, key) else { return; }
+    emit_pr_slice(g, p, cat("_s_", tag_of(c)));
+    guard g.ok else { return; }
+    emit_aux(g, cat6("static void ", key, "(", c, " a) { _pr_", tag_of(c)));
+    emit_aux(g, cat4("_s((_s_", tag_of(c), "){ a.p, a.n }); }\n\n", ""));
+}
+
+fn emit_pr_fixed(g: Gen&, p: ast::Parser&, c: const u8[:]) {
+    let key = cat3("_pr_", tag_of(c), "_a");
+    guard need_helper(g, key) else { return; }
+    let sz = c_size_of(g, c);
+    emit_pr_slice(g, p, cat("_s_", tag_of(c)));
+    guard g.ok else { return; }
+    emit_aux(g, cat6("static void ", key, "(", c, " v) { _pr_", tag_of(c)));
+    emit_aux(g, cat5("_s((_s_", tag_of(c), "){ v.v, ", num_text(sz), " }); }\n\n"));
+}
+
+fn emit_fmt_helpers(g: Gen&) {
+    emit_grow_push(g, "unsigned char");
+    guard g.ok else { return; }
+    guard need_helper(g, "_f_") else { return; }
+    emit_aux(g, "static void _f_i64(_g_u8* b, long long v) { char t[32]; int n = snprintf(t, 32, \"%lld\", v); for (int i = 0; i < n; i++) { _g_push_u8(b, (unsigned char)t[i]); } }\n");
+    emit_aux(g, "static void _f_u64(_g_u8* b, unsigned long long v) { char t[32]; int n = snprintf(t, 32, \"%llu\", v); for (int i = 0; i < n; i++) { _g_push_u8(b, (unsigned char)t[i]); } }\n");
+    emit_aux(g, "static void _f_bool(_g_u8* b, bool v) { const char* t = v ? \"true\" : \"false\"; while (*t) { _g_push_u8(b, (unsigned char)*t); t++; } }\n");
+    emit_aux(g, "static void _f_str(_g_u8* b, _str s) { for (long long i = 0; i < s.n; i++) { _g_push_u8(b, s.p[i]); } }\n");
+    emit_aux(g, "static void _f_f64(_g_u8* b, double v) { char t[40]; int n = snprintf(t, 40, \"%g\", v); if (!strchr(t, '.')) { n = snprintf(t, 40, \"%g.0\", v); } for (int i = 0; i < n; i++) { _g_push_u8(b, (unsigned char)t[i]); } }\n\n");
+}
+
+
+fn pct_esc(t: const u8[:]) -> const u8[:] {
+    let m = spool_n;
+    for i in t.len {
+        spool_put(t[i]);
+        if t[i] == '%' { spool_put('%'); }
+    }
+    return spool[m..spool_n];
+}
+
+recursive fn gen_print_part(g: Gen&, p: ast::Parser&, id: i64) -> const u8[:] {
+    var n .= p.nodes[id];
+    if n.k == ast::Nk.Str {
+        var raw: u8[>..] = [];
+        ast::str_content(n.text, raw);
+        return cat3("printf(\"", pct_esc(c_lit_esc(raw)), "\");\n");
+    }
+    let vc, vk, ve, vek, vn = expr_ty(g, p, id);
+    guard g.ok else { return ""; }
+    if vk == KInt {
+        let v = gen_expr(g, p, id, "", 0);
+        guard g.ok else { return ""; }
+        if unsigned_ctype(vc) {
+            return cat4("printf(\"%llu\", ", v, ");\n", "");
+        }
+        return cat4("printf(\"%lld\", ", v, ");\n", "");
+    }
+    if vk == KBool {
+        let v = gen_expr(g, p, id, "", 0);
+        guard g.ok else { return ""; }
+        return cat4("printf(\"%s\", (", v, ") ? \"true\" : \"false\");\n", "");
+    }
+    if vk == KStr {
+        let v = gen_value(g, p, id, "_str", KStr);
+        guard g.ok else { return ""; }
+        emit_prb(g);
+        guard g.ok else { return ""; }
+        return cat6("_prb(", v, ".p, ", v, ".n);\n", "");
+    }
+    if vk == KStruct {
+        emit_pr_struct(g, p, vc);
+        guard g.ok else { return ""; }
+        let v = gen_value(g, p, id, vc, KStruct);
+        guard g.ok else { return ""; }
+        return cat4(cat("_pr_", tag_of(vc)), "(", v, ");\n");
+    }
+    if vk == KGrow || vk == KSlice || vk == KFixed {
+        let elem = c_elem_of(g, vc);
+        if elem == "unsigned char" {
+            let v = gen_value(g, p, id, "", 0);
+            guard g.ok else { return ""; }
+            emit_prb(g);
+            guard g.ok else { return ""; }
+            return cat6("_prb(", v, ".p, ", v, ".n);\n", "");
+        }
+        var hkey: const u8[:] = "";
+        if vk == KGrow {
+            emit_pr_grow(g, p, vc);
+            hkey = cat3("_pr_", tag_of(vc), "_g(");
+        } else if vk == KSlice {
+            emit_pr_slice(g, p, vc);
+            hkey = cat3("_pr_", tag_of(vc), "_s(");
+        } else {
+            emit_pr_fixed(g, p, vc);
+            hkey = cat3("_pr_", tag_of(vc), "_a(");
+        }
+        guard g.ok else { return ""; }
+        let v = gen_value(g, p, id, "", 0);
+        guard g.ok else { return ""; }
+        return cat3(hkey, v, ");\n");
+    }
+    fail(g, "print supports strings, integers, bools and arrays only yet", p, id);
+    return "";
 }
 
 recursive fn gen_print(g: Gen&, p: ast::Parser&, id: i64, depth: i64) {
-    var fmt: u8[>..] = [];
-    var vals: u8[>..] = [];
+    emit_indent(g, depth);
     var c = nth_child(p, id, 1);
-    var first = true;
     while c >= 0 {
-        var cn .= p.nodes[c];
-        if cn.k == ast::Nk.Str {
-            gen_str_part(g, p, c, fmt);
-        }
-        else if cn.k == ast::Nk.Call && is_str_call(p, c) {
-            let callee = cn.first;
-            var cc .= p.nodes[callee];
-            var inner = cc.next;
-            while inner >= 0 {
-                var in_n .= p.nodes[inner];
-                if in_n.k == ast::Nk.Str {
-                    gen_str_part(g, p, inner, fmt);
-                } else {
-                    let ty = expr_type(g, p, inner);
-                    if !g.ok { return; }
-                    if is_unsigned(ty) { push_text(fmt, "%llu"); }
-                    else { push_text(fmt, "%lld"); }
-                    if !first { push_text(vals, ", "); }
-                    first = false;
-                    gen_expr(g, p, inner, vals);
-                }
-                inner = p.nodes[inner].next;
-            }
-        }
-        else {
-            let ty = expr_type(g, p, c);
-            if !g.ok { return; }
-            if !is_int_type(ty) {
-                fail(g, "print supports strings, integers and bools only yet", p, id);
-                return;
-            }
-            if ty == "bool" {
-                push_text(fmt, "%s");
-                if !first { push_text(vals, ", "); }
-                first = false;
-                push_text(vals, "(");
-                gen_expr(g, p, c, vals);
-                push_text(vals, ") ? \"true\" : \"false\"");
-            }
-            else if is_unsigned(ty) { push_text(fmt, "%llu"); }
-            else { push_text(fmt, "%lld"); }
-            if ty != "bool" {
-                if !first { push_text(vals, ", "); }
-                first = false;
-                gen_expr(g, p, c, vals);
-            }
-        }
+        emit(g, gen_print_part(g, p, c));
+        if !g.ok { return; }
         c = p.nodes[c].next;
     }
     emit_indent(g, depth);
-    emit(g, "printf(\"");
-    emit_buf(g, fmt);
-    emit(g, "\\n\"");
-    if vals.len > 0 {
-        emit(g, ", ");
-        emit_buf(g, vals);
+    emit(g, "printf(\"\\n\");\n");
+}
+
+recursive fn gen_format(g: Gen&, p: ast::Parser&, id: i64, depth: i64) {
+    var n .= p.nodes[id];
+    let a0 = nth_child(p, id, 1);
+    guard a0 >= 0 else {
+        fail(g, "format needs a buffer", p, id);
+        return;
     }
+    let bt0, bk0, bc0, be0, bek0 = gen_path(g, p, a0);
+    guard g.ok else { return; }
+    var bt = bt0;
+    var bk = bk0;
+    var bc = bc0;
+    if bk == KRef && bek0 == KGrow {
+        bk = KGrow;
+        bc = cat("", be0);
+    }
+    guard bk == KGrow && bc == "_g_u8" else {
+        fail(g, "format needs a u8[>..] buffer", p, id);
+        return;
+    }
+    var bref: const u8[:] = "&";
+    if bk0 == KRef { bref = ""; }
+    emit_grow_push(g, "unsigned char");
+    guard g.ok else { return; }
+    emit_indent(g, depth);
+    var c = p.nodes[a0].next;
+    while c >= 0 {
+        var cn .= p.nodes[c];
+        emit(g, "{\n");
+        emit_indent(g, depth + 1);
+        if cn.k == ast::Nk.Str {
+            var raw: u8[>..] = [];
+            ast::str_content(cn.text, raw);
+            emit(g, cat5("_f_str(", cat2(bref, bt), ", (_str){ (const unsigned char*)\"", c_lit_esc(raw), "\", "));
+            emit(g, num_text(raw.len));
+            emit(g, " });\n");
+        } else {
+            let vc, vk, ve, vek, vn = expr_ty(g, p, c);
+            guard g.ok else { return; }
+            let v = gen_expr(g, p, c, "", 0);
+            guard g.ok else { return; }
+            var hkey: const u8[:] = "";
+            if vk == KInt {
+                if unsigned_ctype(vc) {
+                    hkey = "_f_u64(";
+                } else {
+                    hkey = "_f_i64(";
+                }
+            } else if vk == KBool {
+                hkey = "_f_bool(";
+            } else if vk == KStr {
+                hkey = "_f_str(";
+            } else if vk == KFloat {
+                hkey = "_f_f64(";
+            } else {
+                fail(g, "format supports strings, integers and bools only yet", p, id);
+                return;
+            }
+            emit(g, cat5(hkey, cat2(bref, bt), ", ", v, ""));
+            emit(g, ");\n");
+        }
+        emit_indent(g, depth);
+        emit(g, "}\n");
+        c = p.nodes[c].next;
+    }
+}
+
+recursive fn emit_struct_defaults(g: Gen&, p: ast::Parser&, sn: const u8[:]) -> const u8[:] {
+    let sid = struct_sid(g, sn);
+    guard sid >= 0 else { return ""; }
+    let dpi = struct_pi(g, sid);
+    guard dpi >= 0 else { return ""; }
+    let dp = g.sps[dpi];
+    guard child_count(dp, sid) <= 64 else {
+        fail(g, "structs of more than 64 fields are not supported yet", p, sid);
+        return "";
+    }
+    var pieces: const u8[:][64];
+    var np3: i64 = 0;
+    var f = dp.nodes[sid].first;
+    var fi: i64 = 0;
+    while f >= 0 {
+        let fn_, ty = field_split(dp.nodes[f].text);
+        let fc, fk, fe, fek, fn2 = ty_parse(g, p, f, ty);
+        guard g.ok else { return ""; }
+        let dflt = nth_child(dp, f, 0);
+        if dflt >= 0 {
+            let piece = gen_field_default(g, dp, dflt, fc, fk);
+            guard g.ok else { return ""; }
+            pieces[np3] = cat4(".", fn_, " = ", piece);
+            np3++;
+        }
+        fi++;
+        f = dp.nodes[f].next;
+    }
+    let m = spool_n;
+    for i in np3 {
+        if i > 0 { spool_text(", "); }
+        spool_text(pieces[i]);
+    }
+    return spool[m..spool_n];
+}
+
+recursive fn emit_grow_from_init(g: Gen&, p: ast::Parser&, depth: i64, name: const u8[:], tc: const u8[:], tk: i64, te: const u8[:], init: i64) {
+    emit_indent(g, depth);
+    push_text(g.out, tc);
+    emit(g, " ");
+    push_text(g.out, name);
+    emit(g, " = { 0, 0, 0 };\n");
+    var n .= p.nodes[init];
+    if n.k == ast::Nk.Arr {
+        emit_grow_push(g, te);
+        guard g.ok else { return; }
+        var c = n.first;
+        while c >= 0 {
+            emit_indent(g, depth);
+            emit(g, cat3("_g_push_", tag_of(te), "(&"));
+            push_text(g.out, name);
+            emit(g, ", ");
+            emit(g, gen_value(g, p, c, te, c_kind_of(g, te)));
+            guard g.ok else { return; }
+            emit(g, ");\n");
+            c = p.nodes[c].next;
+        }
+        return;
+    }
+    let vc, vk, ve, vek, vn = expr_ty(g, p, init);
+    guard g.ok else { return; }
+    var sfx: const u8[:] = "_s";
+    var view: const u8[:] = "";
+    if vk == KStr {
+        sfx = "_str";
+        view = "_str";
+    } else {
+        let v2, vk2 = view_of(g, vc, vk);
+        guard g.ok else { return; }
+        view = cat("", v2);
+    }
+    emit_grow_append(g, te, view, sfx);
+    guard g.ok else { return; }
+    emit_indent(g, depth);
+    emit(g, cat4("_g_append_", tag_of(te), sfx, "(&"));
+    push_text(g.out, name);
+    emit(g, ", ");
+    emit(g, gen_value(g, p, init, view, if vk == KStr { KStr } else { KSlice }));
+    guard g.ok else { return; }
     emit(g, ");\n");
 }
 
-recursive fn let_type_of(g: Gen&, p: ast::Parser&, init: i64) -> const u8[:] {
-    var n .= p.nodes[init];
-    if n.k == ast::Nk.Int { return "long long"; }
-    if n.k == ast::Nk.As { return ctype_of(g, text_of(p, nth_child(p, init, 1))); }
-    if n.k == ast::Nk.Call {
-        let callee = nth_child(p, init, 0);
-        var cn .= p.nodes[callee];
-        if cn.k == ast::Nk.Name { return lookup_ret(g, cn.text); }
-        return "";
-    }
-    if n.k == ast::Nk.Name { return lookup_type(g, n.text); }
-    let ty = expr_type(g, p, init);
-    if !g.ok { return ""; }
-    if ty == "" { return "long long"; }
-    return ty;
-}
-
-fn emit_let(g: Gen&, p: ast::Parser&, depth: i64, name: const u8[:], ty: const u8[:], init: i64) {
-    var e: u8[>..] = [];
-    gen_expr(g, p, init, e);
+recursive fn emit_let_plain(g: Gen&, p: ast::Parser&, depth: i64, name: const u8[:], tc: const u8[:], tk: i64, te: const u8[:], tek: i64, init: i64) {
+    let e = gen_value(g, p, init, tc, tk);
     if !g.ok { return; }
-    declare(g, name, ty);
+    let gcn = declare(g, name, tc, tk, te, tek);
     emit_indent(g, depth);
-    push_text(g.out, ty);
+    push_text(g.out, tc);
     emit(g, " ");
-    push_text(g.out, name);
+    push_text(g.out, gcn);
     emit(g, " = ");
-    emit_buf(g, e);
+    emit(g, e);
     emit(g, ";\n");
 }
 
-recursive fn gen_stmt(g: Gen&, p: ast::Parser&, id: i64, tail: bool, depth: i64, rets: const u8[:]) {
+
+recursive fn gen_stmt(g: Gen&, p: ast::Parser&, id: i64, tail: bool, depth: i64, rets: const u8[:], fi: i64) {
     guard g.ok else { return; }
     var n .= p.nodes[id];
     if n.k == ast::Nk.Let {
-        if n.val & 2 != 0 || n.val & 4 != 0 || n.val & 8 != 0 || n.val & 16 != 0 {
+        if n.val & 8 != 0 || n.val & 16 != 0 {
             fail(g, "unsupported declaration form", p, id);
             return;
         }
-        if child_count(p, id) > 3 {
-            fail(g, "multiple names or values are not supported yet", p, id);
+        var nnames: i64 = 0;
+        var ninit: i64 = 0;
+        var tyid: i64 = -1;
+        var c = n.first;
+        while c >= 0 {
+            var cn .= p.nodes[c];
+            if cn.k == ast::Nk.Name && ninit == 0 && (cn.val & 2) != 0 {
+                nnames++;
+            } else if cn.k == ast::Nk.Raw && ninit == 0 {
+                tyid = c;
+            } else {
+                ninit++;
+            }
+            c = cn.next;
+        }
+        if nnames == 0 {
+            fail(g, "declaration without a name", p, id);
             return;
         }
-        let name = nth_child(p, id, 0);
-        if is_c_keyword(p.nodes[name].text) {
+        let name1 = nth_child(p, id, 0);
+        if is_c_keyword(p.nodes[name1].text) {
             fail(g, "the name clashes with a C keyword", p, id);
             return;
         }
-        let cc = child_count(p, id);
-        if cc > 3 {
-            fail(g, "multiple names or values are not supported yet", p, id);
-            return;
-        }
-        if cc == 3 {
-            if p.nodes[nth_child(p, id, 1)].k != ast::Nk.Raw {
-                fail(g, "multiple names or values are not supported yet", p, id);
+        if n.val & 2 != 0 {
+            guard nnames == 1 && ninit == 1 else {
+                fail(g, "a bind takes one name and one value", p, id);
                 return;
             }
-            let ty = ctype_of(g, p.nodes[nth_child(p, id, 1)].text);
-            if ty == "" {
-                fail(g, "unsupported variable type", p, id);
+            let init = nth_child(p, id, child_count(p, id) - 1);
+            var initc .= p.nodes[init];
+            if initc.k == ast::Nk.Call {
+                let e = gen_expr(g, p, init, "", 0);
+                if !g.ok { return; }
+                let vc, vk, ve, vek, vn = expr_ty(g, p, init);
+                if !g.ok { return; }
+                guard vk == KRef else {
+                    fail(g, "this call does not return a reference", p, id);
+                    return;
+                }
+                let gcn = declare(g, p.nodes[name1].text, vc, KRef, ve, vek);
+                emit_indent(g, depth);
+                push_text(g.out, vc);
+                emit(g, " ");
+                push_text(g.out, gcn);
+                emit(g, " = ");
+                emit(g, e);
+                emit(g, ";\n");
                 return;
             }
-            emit_let(g, p, depth, p.nodes[name].text, ty, nth_child(p, id, 2));
-            return;
-        }
-        if cc == 2 && p.nodes[nth_child(p, id, 1)].k == ast::Nk.Raw {
-            let ty = ctype_of(g, p.nodes[nth_child(p, id, 1)].text);
-            if ty == "" {
-                fail(g, "unsupported variable type", p, id);
-                return;
-            }
-            declare(g, p.nodes[name].text, ty);
-            emit_indent(g, depth);
-            push_text(g.out, ty);
-            emit(g, " ");
-            push_text(g.out, p.nodes[name].text);
-            emit(g, " = 0;\n");
-            return;
-        }
-        let init = nth_child(p, id, 1);
-        let ty = let_type_of(g, p, init);
-        if !g.ok { return; }
-        if ty == "" {
-            fail(g, "cannot infer the variable type", p, id);
-            return;
-        }
-        emit_let(g, p, depth, p.nodes[name].text, ty, init);
-        return;
-    }
-    if n.k == ast::Nk.Assign {
-        let lval = nth_child(p, id, 0);
-        var ln .= p.nodes[lval];
-        if ln.k != ast::Nk.Name {
-            fail(g, "assignment to complex targets is not supported yet", p, id);
-            return;
-        }
-        let ty = lookup_type(g, ln.text);
-        if ty == "" {
-            fail(g, "unknown variable", p, id);
-            return;
-        }
-        var op: const u8[:] = "";
-        var inc = false;
-        if n.val == 1 && child_count(p, id) == 1 {
-            inc = true;
-            if n.op == ast::Op.SubA { op = "--"; } else { op = "++"; }
-        } else if n.op == ast::Op.Set { op = "="; }
-        else if n.op == ast::Op.AddA { op = "+="; }
-        else if n.op == ast::Op.SubA { op = "-="; }
-        else if n.op == ast::Op.MulA { op = "*="; }
-        else if n.op == ast::Op.DivA { op = "/="; }
-        else if n.op == ast::Op.ModA { op = "%="; }
-        else if n.op == ast::Op.BandA { op = "&="; }
-        else if n.op == ast::Op.BorA { op = "|="; }
-        else if n.op == ast::Op.XorA { op = "^="; }
-        else if n.op == ast::Op.ShlA { op = "<<="; }
-        else if n.op == ast::Op.ShrA { op = ">>="; }
-        else {
-            fail(g, "unsupported assignment operator", p, id);
-            return;
-        }
-        var e: u8[>..] = [];
-        if !inc {
-            let rhs = nth_child(p, id, 1);
-            gen_expr(g, p, rhs, e);
+            let pt, pk, pc, pe, pek = gen_path(g, p, init);
             if !g.ok { return; }
-        }
-        emit_indent(g, depth);
-        push_text(g.out, ln.text);
-        emit(g, " ");
-        push_text(g.out, op);
-        if inc {
+            let gcn = declare(g, p.nodes[name1].text, cat3(pc, "*", ""), KRef, pc, pk);
+            emit_indent(g, depth);
+            push_text(g.out, pc);
+            emit(g, " *");
+            push_text(g.out, gcn);
+            emit(g, " = &");
+            push_text(g.out, pt);
             emit(g, ";\n");
             return;
         }
-        emit(g, " ");
-        emit_buf(g, e);
-        emit(g, ";\n");
+        if tyid >= 0 {
+            let tc, tk, te, tek, tn = ty_parse(g, p, tyid, text_of(p, tyid));
+            if !g.ok { return; }
+            if nnames > 1 {
+                fail(g, "an explicit type with several names is not supported yet", p, id);
+                return;
+            }
+            if ninit == 0 {
+                var di: const u8[:] = "";
+                if tk == KStruct {
+                    di = emit_struct_defaults(g, p, tc);
+                    if !g.ok { return; }
+                }
+                let gcn = declare(g, p.nodes[name1].text, tc, tk, te, tek);
+                emit_indent(g, depth);
+                push_text(g.out, tc);
+                emit(g, " ");
+                push_text(g.out, gcn);
+                if di.len > 0 {
+                    emit(g, cat3(" = { ", di, " };\n"));
+                } else {
+                    emit(g, " = { 0 };\n");
+                }
+                return;
+            }
+            let init = nth_child(p, id, child_count(p, id) - 1);
+            if tk == KGrow {
+                let gcn = declare(g, p.nodes[name1].text, tc, tk, te, tek);
+                emit_grow_from_init(g, p, depth, gcn, tc, tk, te, init);
+                if !g.ok { return; }
+                return;
+            }
+            emit_let_plain(g, p, depth, p.nodes[name1].text, tc, tk, te, tek, init);
+            return;
+        }
+        if ninit == 0 {
+            fail(g, "a variable needs an initializer or a type", p, id);
+            return;
+        }
+        if nnames > 1 && ninit == 1 {
+            let init = nth_child(p, id, child_count(p, id) - 1);
+            var initc .= p.nodes[init];
+            guard initc.k == ast::Nk.Call else {
+                fail(g, "several names need a call that returns several values", p, id);
+                return;
+            }
+            let callee = initc.first;
+            var cn .= p.nodes[callee];
+            guard cn.k == ast::Nk.Name else {
+                fail(g, "several names need a plain function call", p, id);
+                return;
+            }
+            let fnm = resolve_fn(g, cn.text);
+            let fi2 = fn_index(g, fnm);
+            guard fi2 >= 0 else {
+                fail(g, "call of an unknown function", p, id);
+                return;
+            }
+            let rc = ret_count(g, fi2);
+            guard rc == nnames else {
+                fail(g, "the call and the names disagree in count", p, id);
+                return;
+            }
+            g.tuple_ctx = true;
+            let e = gen_expr(g, p, init, "", 0);
+            g.tuple_ctx = false;
+            if !g.ok { return; }
+            g.tmp++;
+            let tn = cat("__cgen_tmp_", num_text(g.tmp));
+            let rt = g.frets[fi2];
+            emit_indent(g, depth);
+            push_text(g.out, rt);
+            emit(g, " ");
+            emit(g, tn);
+            emit(g, " = ");
+            emit(g, e);
+            emit(g, ";\n");
+            var nameid = n.first;
+            var ri: i64 = 0;
+            while nameid >= 0 {
+                var nmv .= p.nodes[nameid];
+                if nmv.k == ast::Nk.Name {
+                    if is_c_keyword(nmv.text) {
+                        fail(g, "the name clashes with a C keyword", p, id);
+                        return;
+                    }
+                    let rk = ret_kind_at(g, fi2, ri);
+                    let rc0 = ret_c_at(g, fi2, ri);
+                    let gcn = declare(g, nmv.text, rc0, rk, "", 0);
+                    emit_indent(g, depth);
+                    push_text(g.out, rc0);
+                    emit(g, " ");
+                    push_text(g.out, gcn);
+                    emit(g, " = ");
+                    emit(g, tn);
+                    emit(g, ret_field(ri));
+                    emit(g, ";\n");
+                    ri++;
+                }
+                nameid = nmv.next;
+            }
+            return;
+        }
+        if nnames != ninit {
+            fail(g, "names and values disagree in count", p, id);
+            return;
+        }
+        var nameid = n.first;
+        var initid = nth_child(p, id, nnames);
+        while nameid >= 0 && initid >= 0 {
+            let vc, vk, ve, vek, vn = expr_ty(g, p, initid);
+            if !g.ok { return; }
+            if is_c_keyword(p.nodes[nameid].text) {
+                fail(g, "the name clashes with a C keyword", p, id);
+                return;
+            }
+            emit_let_plain(g, p, depth, p.nodes[nameid].text, vc, vk, ve, vek, initid);
+            if !g.ok { return; }
+            nameid = p.nodes[nameid].next;
+            initid = p.nodes[initid].next;
+        }
+        return;
+    }
+    if n.k == ast::Nk.Assign {
+        gen_assign(g, p, id, tail, depth, rets, fi);
         return;
     }
     if n.k == ast::Nk.Expr {
@@ -526,7 +3062,7 @@ recursive fn gen_stmt(g: Gen&, p: ast::Parser&, id: i64, tail: bool, depth: i64,
             || en.k == ast::Nk.Block || en.k == ast::Nk.Match || en.k == ast::Nk.Loop
             || en.k == ast::Nk.Let || en.k == ast::Nk.Assign || en.k == ast::Nk.Return
             || en.k == ast::Nk.Break || en.k == ast::Nk.Continue || en.k == ast::Nk.Defer {
-            gen_stmt(g, p, e, (n.val & 1) != 0, depth, rets);
+            gen_stmt(g, p, e, tail, depth, rets, fi);
             return;
         }
         if en.k == ast::Nk.Call {
@@ -536,52 +3072,56 @@ recursive fn gen_stmt(g: Gen&, p: ast::Parser&, id: i64, tail: bool, depth: i64,
                 gen_print(g, p, e, depth);
                 return;
             }
+            if cc.k == ast::Nk.Name && cc.text == "format" {
+                emit_fmt_helpers(g);
+                if !g.ok { return; }
+                gen_format(g, p, e, depth);
+                return;
+            }
+            if cc.k == ast::Nk.Field {
+                let method = cc.text;
+                let base_id = nth_child(p, callee, 0);
+                let mpath, mkind, mcty, mel, mekind = gen_path(g, p, base_id);
+                if !g.ok { return; }
+                if (mkind == KGrow || (mkind == KRef && mekind == KGrow)) && method == "clear" {
+                    emit_indent(g, depth);
+                    push_text(g.out, mpath);
+                    if mkind == KRef { emit(g, "->"); }
+                    emit(g, ".n = 0;\n");
+                    return;
+                }
+                let e2 = gen_expr(g, p, e, "", 0);
+                if !g.ok { return; }
+                emit_indent(g, depth);
+                emit(g, e2);
+                emit(g, ";\n");
+                return;
+            }
         }
-        var buf: u8[>..] = [];
-        gen_expr(g, p, e, buf);
+        let buf = gen_expr(g, p, e, "", 0);
         if !g.ok { return; }
         emit_indent(g, depth);
         if tail && rets != "" && rets != "void" {
             emit(g, "return ");
-            emit_buf(g, buf);
+            emit(g, buf);
             emit(g, ";\n");
             return;
         }
-        emit_buf(g, buf);
+        emit(g, buf);
         emit(g, ";\n");
         return;
     }
-    if n.k == ast::Nk.If {
-        let cond = nth_child(p, id, 0);
-        let then = nth_child(p, id, 1);
-        let els = nth_child(p, id, 2);
+    if n.k == ast::Nk.Block {
         emit_indent(g, depth);
-        emit(g, "if (");
-        {
-            var buf: u8[>..] = [];
-            gen_expr(g, p, cond, buf);
-            if !g.ok { return; }
-            emit_buf(g, buf);
-        }
-        emit(g, ") {\n");
-        let branch_tail = tail && rets != "" && rets != "void";
-        gen_block(g, p, then, depth + 1, rets, branch_tail);
+        emit(g, "{\n");
+        gen_block(g, p, id, depth + 1, rets, false, false, fi);
         if !g.ok { return; }
-        if els >= 0 {
-            var en .= p.nodes[els];
-            if en.k == ast::Nk.If {
-                emit_indent(g, depth);
-                emit(g, "} else ");
-                gen_stmt(g, p, els, tail, depth, rets);
-                return;
-            }
-            emit_indent(g, depth);
-            emit(g, "} else {\n");
-            gen_block(g, p, els, depth + 1, rets, branch_tail);
-            if !g.ok { return; }
-        }
         emit_indent(g, depth);
         emit(g, "}\n");
+        return;
+    }
+    if n.k == ast::Nk.If {
+        gen_if(g, p, id, tail, depth, rets, fi);
         return;
     }
     if n.k == ast::Nk.While {
@@ -589,97 +3129,32 @@ recursive fn gen_stmt(g: Gen&, p: ast::Parser&, id: i64, tail: bool, depth: i64,
         let body = nth_child(p, id, 1);
         emit_indent(g, depth);
         emit(g, "while (");
-        {
-            var buf: u8[>..] = [];
-            gen_expr(g, p, cond, buf);
-            if !g.ok { return; }
-            emit_buf(g, buf);
-        }
+        let buf = gen_expr(g, p, cond, "", 0);
+        if !g.ok { return; }
+        emit(g, buf);
         emit(g, ") {\n");
-        gen_block(g, p, body, depth + 1, rets, false);
+        gen_block(g, p, body, depth + 1, rets, false, false, fi);
+        if !g.ok { return; }
+        emit_indent(g, depth);
+        emit(g, "}\n");
+        return;
+    }
+    if n.k == ast::Nk.Loop {
+        let body = nth_child(p, id, 0);
+        emit_indent(g, depth);
+        emit(g, "for (;;) {\n");
+        gen_block(g, p, body, depth + 1, rets, false, false, fi);
         if !g.ok { return; }
         emit_indent(g, depth);
         emit(g, "}\n");
         return;
     }
     if n.k == ast::Nk.For {
-        let name = nth_child(p, id, 0);
-        let seq = nth_child(p, id, 1);
-        let body = nth_child(p, id, 2);
-        var sn .= p.nodes[seq];
-        var lo: i64 = -1;
-        var hi: i64 = -1;
-        if sn.k == ast::Nk.Range {
-            lo = nth_child(p, seq, 0);
-            hi = nth_child(p, seq, 1);
-        }
-        if hi < 0 {
-            fail(g, "for over slices and arrays is not supported yet", p, id);
-            return;
-        }
-        var names .= p.nodes[name];
-        if is_c_keyword(names.text) {
-            fail(g, "the loop name clashes with a C keyword", p, id);
-            return;
-        }
-        g.tmp++;
-        declare(g, names.text, "long long");
-        emit_indent(g, depth);
-        {
-            var endname: u8[>..] = [];
-            format(endname, "__cgen_end_", g.tmp);
-            emit(g, "for (long long ");
-            push_text(g.out, names.text);
-            emit(g, " = ");
-            {
-                var lbuf: u8[>..] = [];
-                gen_expr(g, p, lo, lbuf);
-                if !g.ok { return; }
-                emit_buf(g, lbuf);
-            }
-            emit(g, ", ");
-            emit_buf(g, endname);
-            emit(g, " = ");
-            {
-                var hbuf: u8[>..] = [];
-                gen_expr(g, p, hi, hbuf);
-                if !g.ok { return; }
-                emit_buf(g, hbuf);
-            }
-            emit(g, "; ");
-            push_text(g.out, names.text);
-            emit(g, " < ");
-            emit_buf(g, endname);
-            emit(g, "; ");
-            push_text(g.out, names.text);
-            emit(g, "++) {\n");
-        }
-        {
-            gen_block(g, p, body, depth + 1, rets, false);
-            if !g.ok { return; }
-        }
-        emit_indent(g, depth);
-        emit(g, "}\n");
+        gen_for(g, p, id, depth, rets, fi);
         return;
     }
     if n.k == ast::Nk.Return {
-        let vals = child_count(p, id);
-        if vals > 1 {
-            fail(g, "multiple return values are not supported yet", p, id);
-            return;
-        }
-        emit_indent(g, depth);
-        if vals == 0 {
-            emit(g, "return;\n");
-            return;
-        }
-        let v = nth_child(p, id, 0);
-        var buf: u8[>..] = [];
-        gen_expr(g, p, v, buf);
-        if !g.ok { return; }
-        emit(g, "return ");
-        emit_buf(g, buf);
-        emit(g, ";\n");
+        gen_return(g, p, id, depth, rets, fi);
         return;
     }
     if n.k == ast::Nk.Break {
@@ -699,105 +3174,444 @@ recursive fn gen_stmt(g: Gen&, p: ast::Parser&, id: i64, tail: bool, depth: i64,
     fail(g, "unsupported statement form", p, id);
 }
 
-recursive fn gen_block(g: Gen&, p: ast::Parser&, id: i64, depth: i64, rets: const u8[:], force: bool) {
+recursive fn gen_block(g: Gen&, p: ast::Parser&, id: i64, depth: i64, rets: const u8[:], force: bool, top: bool, fi: i64) {
     guard g.ok else { return; }
     var c = first_child(p, id);
     var last = p.nodes[id].last;
     while c >= 0 {
-        let tail = c == last && ((p.nodes[c].val & 1) != 0 || force);
-        gen_stmt(g, p, c, tail, depth, rets);
+        let tail = c == last && (force || (top && (p.nodes[c].val & 1) != 0));
+        gen_stmt(g, p, c, tail, depth, rets, fi);
         if !g.ok { return; }
         c = p.nodes[c].next;
     }
 }
 
-fn fn_ret_type(g: Gen&, p: ast::Parser&, id: i64) -> const u8[:] {
+
+fn gen_assign(g: Gen&, p: ast::Parser&, id: i64, tail: bool, depth: i64, rets: const u8[:], fi: i64) {
+    guard g.ok else { return; }
     var n .= p.nodes[id];
-    let body = n.last;
-    if body < 0 || p.nodes[body].k != ast::Nk.Block {
-        fail(g, "extern and declared-only functions are not supported yet", p, id);
-        return "";
-    }
-    var c = n.first;
-    var seen_param = false;
-    var has_rets = false;
-    var rets: const u8[:] = "void";
-    while c >= 0 && c != body {
-        var cn .= p.nodes[c];
-        if cn.k == ast::Nk.Param { seen_param = true; }
-        else if cn.k == ast::Nk.Raw {
-            if !seen_param {
-                fail(g, "generic functions are not supported yet", p, id);
-                return "";
-            }
-            rets = ctype_of(g, cn.text);
-            has_rets = true;
+    if n.op == ast::Op.Set && n.val >= 1 {
+        let rhs = nth_child(p, id, n.val);
+        guard rhs >= 0 else {
+            fail(g, "malformed assignment", p, id);
+            return;
         }
-        c = cn.next;
+        var rc .= p.nodes[rhs];
+        guard rc.k == ast::Nk.Call else {
+            fail(g, "multiple assignment needs a call on the right", p, id);
+            return;
+        }
+        let callee = rc.first;
+        var cn .= p.nodes[callee];
+        guard cn.k == ast::Nk.Name else {
+            fail(g, "multiple assignment needs a plain call", p, id);
+            return;
+        }
+        let fnm = resolve_fn(g, cn.text);
+        let fi2 = fn_index(g, fnm);
+        guard fi2 >= 0 else {
+            fail(g, "call of an unknown function", p, id);
+            return;
+        }
+        guard ret_count(g, fi2) == n.val else {
+            fail(g, "the call and the places disagree in count", p, id);
+            return;
+        }
+        g.tuple_ctx = true;
+        let e = gen_expr(g, p, rhs, "", 0);
+        g.tuple_ctx = false;
+        if !g.ok { return; }
+        g.tmp++;
+        let tn = cat("__cgen_tmp_", num_text(g.tmp));
+        emit_indent(g, depth);
+        push_text(g.out, g.frets[fi2]);
+        emit(g, " ");
+        emit(g, tn);
+        emit(g, " = ");
+        emit(g, e);
+        emit(g, ";\n");
+        var li: i64 = 0;
+        while li < n.val {
+            let lv = nth_child(p, id, li);
+            let pt, pk, pc, pe, pek = gen_path(g, p, lv);
+            if !g.ok { return; }
+            emit_indent(g, depth);
+            push_text(g.out, pt);
+            emit(g, " = ");
+            emit(g, tn);
+            emit(g, ret_field(li));
+            emit(g, ";\n");
+            li++;
+        }
+        return;
     }
-    if has_rets && rets == "" {
-        fail(g, "unsupported return type", p, id);
-        return "";
+    let lval = nth_child(p, id, 0);
+    let pt, pk, pc, pe, pek = gen_path(g, p, lval);
+    if !g.ok { return; }
+    var op: const u8[:] = "";
+    var inc = false;
+    if n.val == 1 && child_count(p, id) == 1 {
+        inc = true;
+        if n.op == ast::Op.SubA { op = "--"; } else { op = "++"; }
+    } else if n.op == ast::Op.Set { op = "="; }
+    else if n.op == ast::Op.AddA { op = "+="; }
+    else if n.op == ast::Op.SubA { op = "-="; }
+    else if n.op == ast::Op.MulA { op = "*="; }
+    else if n.op == ast::Op.DivA { op = "/="; }
+    else if n.op == ast::Op.ModA { op = "%="; }
+    else if n.op == ast::Op.BandA { op = "&="; }
+    else if n.op == ast::Op.BorA { op = "|="; }
+    else if n.op == ast::Op.XorA { op = "^="; }
+    else if n.op == ast::Op.ShlA { op = "<<="; }
+    else if n.op == ast::Op.ShrA { op = ">>="; }
+    else {
+        fail(g, "unsupported assignment operator", p, id);
+        return;
     }
-    return rets;
+    if !inc {
+        let rhs = nth_child(p, id, 1);
+        if pk == KGrow && n.op == ast::Op.Set {
+            emit_grow_assign(g, c_elem_of(g, pc));
+            if !g.ok { return; }
+            let e = gen_expr(g, p, rhs, "", 0);
+            if !g.ok { return; }
+            emit_indent(g, depth);
+            emit(g, cat3("_g_assign_", tag_of(c_elem_of(g, pc)), "(&"));
+            push_text(g.out, pt);
+            emit(g, ", ");
+            emit(g, e);
+            emit(g, ");\n");
+            return;
+        }
+        let e = gen_value(g, p, rhs, pc, pk);
+        if !g.ok { return; }
+        emit_indent(g, depth);
+        push_text(g.out, pt);
+        emit(g, " ");
+        push_text(g.out, op);
+        emit(g, " ");
+        emit(g, e);
+        emit(g, ";\n");
+        return;
+    }
+    emit_indent(g, depth);
+    push_text(g.out, pt);
+    emit(g, " ");
+    push_text(g.out, op);
+    emit(g, ";\n");
 }
 
-fn check_fn_head(g: Gen&, p: ast::Parser&, id: i64) -> bool {
+fn gen_if(g: Gen&, p: ast::Parser&, id: i64, tail: bool, depth: i64, rets: const u8[:], fi: i64) {
+    guard g.ok else { return; }
+    let cond = nth_child(p, id, 0);
+    let then = nth_child(p, id, 1);
+    let els = nth_child(p, id, 2);
+    emit_indent(g, depth);
+    emit(g, "if (");
+    let buf = gen_expr(g, p, cond, "", 0);
+    if !g.ok { return; }
+    emit(g, buf);
+    emit(g, ") {\n");
+    let branch_tail = tail && rets != "" && rets != "void";
+    gen_block(g, p, then, depth + 1, rets, branch_tail, false, fi);
+    if !g.ok { return; }
+    if els >= 0 {
+        var en .= p.nodes[els];
+        if en.k == ast::Nk.If {
+            emit_indent(g, depth);
+            emit(g, "} else ");
+            gen_stmt(g, p, els, tail, depth, rets, fi);
+            return;
+        }
+        emit_indent(g, depth);
+        emit(g, "} else {\n");
+        gen_block(g, p, els, depth + 1, rets, branch_tail, false, fi);
+        if !g.ok { return; }
+    }
+    emit_indent(g, depth);
+    emit(g, "}\n");
+}
+
+fn gen_for(g: Gen&, p: ast::Parser&, id: i64, depth: i64, rets: const u8[:], fi: i64) {
+    guard g.ok else { return; }
     var n .= p.nodes[id];
-    if n.val & 1 != 0 || n.val & 2 != 0 || n.val & 4 != 0 || n.val & 8 != 0
-        || n.val & 16 != 0 || n.val & 32 != 0 || n.val & 64 != 0 {
-        fail(g, "function qualifiers are not supported yet", p, id);
-        return false;
+    let name = nth_child(p, id, 0);
+    let seq = nth_child(p, id, 1);
+    let body = nth_child(p, id, 2);
+    var names .= p.nodes[name];
+    if is_c_keyword(names.text) {
+        fail(g, "the loop name clashes with a C keyword", p, id);
+        return;
     }
-    guard fn_ret_type(g, p, id) != "" else { return false; }
-    if is_c_keyword(n.text) {
-        fail(g, "the function name clashes with a C keyword", p, id);
-        return false;
+    var sn .= p.nodes[seq];
+    if sn.k == ast::Nk.Range {
+        let lo = nth_child(p, seq, 0);
+        let hi = nth_child(p, seq, 1);
+        guard hi >= 0 else {
+            fail(g, "this range has no end", p, id);
+            return;
+        }
+        g.tmp++;
+        let gcn = declare(g, names.text, "long long", KInt, "", 0);
+        emit_indent(g, depth);
+        let endname = cat("__cgen_end_", num_text(g.tmp));
+        emit(g, "for (long long ");
+        push_text(g.out, gcn);
+        emit(g, " = ");
+        let lbuf = gen_expr(g, p, lo, "long long", KInt);
+        if !g.ok { return; }
+        emit(g, lbuf);
+        emit(g, ", ");
+        emit(g, endname);
+        emit(g, " = ");
+        let hbuf = gen_expr(g, p, hi, "long long", KInt);
+        if !g.ok { return; }
+        emit(g, hbuf);
+        emit(g, "; ");
+        push_text(g.out, gcn);
+        emit(g, " < ");
+        emit(g, endname);
+        emit(g, "; ");
+        push_text(g.out, gcn);
+        emit(g, "++) {\n");
+        gen_block(g, p, body, depth + 1, rets, false, false, fi);
+        if !g.ok { return; }
+        emit_indent(g, depth);
+        emit(g, "}\n");
+        return;
     }
-    var c = n.first;
+    let sc, sk, se, sek, sn2 = expr_ty(g, p, seq);
+    if !g.ok { return; }
+    if sk == KInt {
+        g.tmp++;
+        let gcn = declare(g, names.text, "long long", KInt, "", 0);
+        emit_indent(g, depth);
+        let endname = cat("__cgen_end_", num_text(g.tmp));
+        emit(g, "{ long long ");
+        emit(g, endname);
+        emit(g, " = ");
+        let sbuf = gen_expr(g, p, seq, "long long", KInt);
+        if !g.ok { return; }
+        emit(g, sbuf);
+        emit(g, "; for (long long ");
+        push_text(g.out, gcn);
+        emit(g, " = 0; ");
+        push_text(g.out, gcn);
+        emit(g, " < ");
+        emit(g, endname);
+        emit(g, "; ");
+        push_text(g.out, gcn);
+        emit(g, "++) {\n");
+        gen_block(g, p, body, depth + 1, rets, false, false, fi);
+        if !g.ok { return; }
+        emit_indent(g, depth);
+        emit(g, "}\n}\n");
+        return;
+    }
+    if sk == KSlice || sk == KGrow || sk == KStr {
+        g.tmp++;
+        let itname = cat("__cgen_it_", num_text(g.tmp));
+        let gcn = declare(g, names.text, se, sek, "", 0);
+        emit_indent(g, depth);
+        emit(g, "{ ");
+        push_text(g.out, sc);
+        emit(g, " ");
+        emit(g, itname);
+        emit(g, " = ");
+        let sbuf = gen_value(g, p, seq, sc, sk);
+        if !g.ok { return; }
+        emit(g, sbuf);
+        emit(g, "; for (long long __i = 0; __i < ");
+        emit(g, itname);
+        emit(g, ".n; __i++) {\n");
+        emit_indent(g, depth + 1);
+        push_text(g.out, se);
+        emit(g, " ");
+        push_text(g.out, gcn);
+        emit(g, " = ");
+        emit(g, itname);
+        emit(g, ".p[__i];\n");
+        gen_block(g, p, body, depth + 1, rets, false, false, fi);
+        if !g.ok { return; }
+        emit_indent(g, depth);
+        emit(g, "}\n}\n");
+        return;
+    }
+    if sk == KFixed {
+        g.tmp++;
+        let itname = cat("__cgen_it_", num_text(g.tmp));
+        let gcn = declare(g, names.text, se, sek, "", 0);
+        emit_indent(g, depth);
+        emit(g, "{ ");
+        push_text(g.out, sc);
+        emit(g, " ");
+        emit(g, itname);
+        emit(g, " = ");
+        let sbuf = gen_value(g, p, seq, sc, sk);
+        if !g.ok { return; }
+        emit(g, sbuf);
+        emit(g, "; for (long long __i = 0; __i < ");
+        emit(g, num_text(c_size_of(g, sc)));
+        emit(g, "; __i++) {\n");
+        emit_indent(g, depth + 1);
+        push_text(g.out, se);
+        emit(g, " ");
+        push_text(g.out, gcn);
+        emit(g, " = ");
+        emit(g, itname);
+        emit(g, ".v[__i];\n");
+        gen_block(g, p, body, depth + 1, rets, false, false, fi);
+        if !g.ok { return; }
+        emit_indent(g, depth);
+        emit(g, "}\n}\n");
+        return;
+    }
+    fail(g, "for over this value is not supported yet", p, id);
+}
+
+fn gen_return(g: Gen&, p: ast::Parser&, id: i64, depth: i64, rets: const u8[:], fi: i64) {
+    guard g.ok else { return; }
+    var n .= p.nodes[id];
+    let vals = child_count(p, id);
+    emit_indent(g, depth);
+    if vals == 0 {
+        if g.fns[fi] == "main" {
+            emit(g, "return 0;\n");
+        } else {
+            emit(g, "return;\n");
+        }
+        return;
+    }
+    let frets = g.frets[fi];
+    if frets == "void" {
+        fail(g, "this function returns nothing", p, id);
+        return;
+    }
+    if vals == 1 {
+        let v = nth_child(p, id, 0);
+        var vn .= p.nodes[v];
+        if vn.k == ast::Nk.Call {
+            let callee = vn.first;
+            var cn2 .= p.nodes[callee];
+            if cn2.k == ast::Nk.Name {
+                let fnm2 = resolve_fn(g, cn2.text);
+                let fi2 = fn_index(g, fnm2);
+                if fi2 >= 0 && ret_count(g, fi2) == ret_count(g, fi) && ret_count(g, fi) > 1 {
+                    g.tuple_ctx = true;
+                    let e = gen_expr(g, p, v, "", 0);
+                    g.tuple_ctx = false;
+                    if !g.ok { return; }
+                    g.tmp++;
+                    let tn = cat("__cgen_fwd_", num_text(g.tmp));
+                    let m = spool_n;
+                    spool_text("{ ");
+                    spool_text(g.frets[fi2]);
+                    spool_text(" ");
+                    spool_text(tn);
+                    spool_text(" = ");
+                    spool_text(e);
+                    spool_text("; return (");
+                    spool_text(frets);
+                    spool_text("){ ");
+                    var ri: i64 = 0;
+                    while ri < ret_count(g, fi) {
+                        if ri > 0 { spool_text(", "); }
+                        spool_text(ret_field(ri));
+                        spool_text(" = ");
+                        spool_text(tn);
+                        spool_text(ret_field(ri));
+                        ri++;
+                    }
+                    spool_text(" }; }\n");
+                    emit(g, spool[m..spool_n]);
+                    return;
+                }
+            }
+        }
+        let e = gen_value(g, p, v, frets, ret_kind_at(g, fi, 0));
+        if !g.ok { return; }
+        emit(g, "return ");
+        emit(g, e);
+        emit(g, ";\n");
+        return;
+    }
+    let rc = ret_count(g, fi);
+    guard rc == vals else {
+        fail(g, "the return does not match the function results", p, id);
+        return;
+    }
+    var es: const u8[:][8];
+    var vi: i64 = 0;
+    while vi < vals {
+        let v = nth_child(p, id, vi);
+        let rcs = ret_c_at(g, fi, vi);
+        let rk = ret_kind_at(g, fi, vi);
+        let e = gen_value(g, p, v, rcs, rk);
+        if !g.ok { return; }
+        es[vi] = e;
+        vi++;
+    }
+    let m = spool_n;
+    spool_text(frets);
+    spool_text(" _rv = { ");
+    var vi2: i64 = 0;
+    while vi2 < vals {
+        if vi2 > 0 { spool_text(", "); }
+        spool_text(ret_field(vi2));
+        spool_text(" = ");
+        spool_text(es[vi2]);
+        vi2++;
+    }
+    spool_text(" };\n");
+    emit(g, spool[m..spool_n]);
+    emit_indent(g, depth);
+    emit(g, "return _rv;\n");
+}
+
+fn gen_fn(g: Gen&, p: ast::Parser&, id: i64, fi: i64) {
+    guard g.ok else { return; }
+    var n .= p.nodes[id];
+    let rets = g.frets[fi];
     let body = n.last;
+    var pnames: const u8[:][>..] = [];
+    var c = n.first;
     while c >= 0 && c != body {
         var cn .= p.nodes[c];
         if cn.k == ast::Nk.Param {
-            if cn.val & 1 != 0 {
-                fail(g, "var parameters are not supported yet", p, id);
-                return false;
-            }
-            if child_count(p, c) > 1 {
-                fail(g, "parameter defaults are not supported yet", p, id);
-                return false;
-            }
             let pty = nth_child(p, c, 0);
-            var pt: const u8[:] = "long long";
-            if pty >= 0 { pt = ctype_of(g, text_of(p, pty)); }
-            if pt == "" {
-                fail(g, "unsupported parameter type", p, id);
-                return false;
-            }
-            if is_c_keyword(cn.text) {
-                fail(g, "the parameter name clashes with a C keyword", p, id);
-                return false;
-            }
+            var span: const u8[:] = cat("", "i64");
+            if pty >= 0 { span = cat("", text_of(p, pty)); }
+            let pc, pk, pe, pek, pn = ty_parse(g, p, if pty >= 0 { pty } else { c }, span);
+            guard g.ok else { return; }
+            let gcn = declare(g, cn.text, pc, pk, pe, pek);
+            pnames.push(gcn);
         }
         c = cn.next;
     }
-    return true;
-}
-
-recursive fn gen_fn(g: Gen&, p: ast::Parser&, id: i64) {
-    guard g.ok else { return; }
-    var n .= p.nodes[id];
-    guard check_fn_head(g, p, id) else { return; }
-    let rets = fn_ret_type(g, p, id);
-    guard g.ok else { return; }
-    let body = n.last;
+    let use_args_main = n.text == "main" && g.use_args;
     if n.text == "main" {
-        emit(g, "int main(void) {\n");
+        if use_args_main {
+            emit(g, "int main(int argc, char** argv) {\n");
+            emit_indent(g, 1);
+            emit(g, "{\n");
+            emit_indent(g, 2);
+            emit(g, "for (int _ai = 0; _ai < argc; _ai++) {\n");
+            emit_indent(g, 3);
+            emit(g, "_str s; s.p = (const unsigned char*)argv[_ai]; s.n = (long long)strlen(argv[_ai]);\n");
+            emit_indent(g, 3);
+            emit(g, "_g_push_str(&__cgen_args, s);\n");
+            emit_indent(g, 2);
+            emit(g, "}\n");
+            emit_indent(g, 1);
+            emit(g, "}\n");
+        } else {
+            emit(g, "int main(void) {\n");
+        }
     } else {
         emit(g, "static ");
         push_text(g.out, rets);
         emit(g, " ");
-        push_text(g.out, n.text);
+        push_text(g.out, g.fns[fi]);
         emit(g, "(");
         var c2 = n.first;
         var pi: i64 = 0;
@@ -805,92 +3619,55 @@ recursive fn gen_fn(g: Gen&, p: ast::Parser&, id: i64) {
             var cn2 .= p.nodes[c2];
             if cn2.k == ast::Nk.Param {
                 if pi > 0 { emit(g, ", "); }
-                let pty = nth_child(p, c2, 0);
-                var pt: const u8[:] = "long long";
-                if pty >= 0 { pt = ctype_of(g, text_of(p, pty)); }
-                push_text(g.out, pt);
+                let pc, pk = param_ty_at(g, fi, pi);
+                push_text(g.out, pc);
                 emit(g, " ");
-                push_text(g.out, p.nodes[c2].text);
-                declare(g, p.nodes[c2].text, pt);
+                push_text(g.out, pnames[pi]);
                 pi++;
             }
             c2 = cn2.next;
         }
         emit(g, ") {\n");
     }
-    gen_block(g, p, body, 1, rets, false);
+    gen_block(g, p, body, 1, rets, false, true, fi);
     if !g.ok { return; }
     if n.text == "main" {
         emit_indent(g, 1);
         emit(g, "return 0;\n");
     }
     emit(g, "}\n\n");
+    g.vlen = g.nglobals;
 }
 
-recursive fn gen(g: Gen&, p: ast::Parser&, root: i64) {
+fn emit_bodies(g: Gen&, p: ast::Parser&, root: i64) {
+    guard g.ok else { return; }
+    g.ns = p.ns;
     var c = first_child(p, root);
-    var count: i64 = 0;
     while c >= 0 {
         var cn .= p.nodes[c];
-        if cn.k != ast::Nk.Fn {
-            fail(g, "only functions are supported at top level yet", p, c);
-            return;
+        if cn.k == ast::Nk.Fn {
+            let fi = fn_index(g, if g.ns != "" { mangle(cat3(g.ns, "_", cn.text)) } else { mangle(cn.text) });
+            guard fi >= 0 else {
+                fail(g, "function was not scanned", p, c);
+                return;
+            }
+            gen_fn(g, p, c, fi);
+            if !g.ok { return; }
         }
-        guard check_fn_head(g, p, c) else { return; }
-        let rets = fn_ret_type(g, p, c);
-        guard g.ok else { return; }
-        g.fns.push(p.nodes[c].text);
-        g.frets.push(rets);
         c = cn.next;
-        count++;
     }
-    if count == 0 {
+}
+
+fn gen(g: Gen&, p: ast::Parser&, root: i64) {
+    scan_file(g, p, root);
+    if !g.ok { return; }
+    emit_fdecls(g);
+    if !g.ok { return; }
+    emit_bodies(g, p, root);
+    if !g.ok { return; }
+    if g.fns.len == 0 {
         g.ok = false;
         g.msg = "the program has no functions";
         return;
-    }
-    emit(g, "#include <stdio.h>\n#include <stdbool.h>\n\n");
-    c = first_child(p, root);
-    while c >= 0 {
-        var cn .= p.nodes[c];
-        let rets = fn_ret_type(g, p, c);
-        guard g.ok else { return; }
-        if p.nodes[c].text == "main" {
-            emit(g, "int main(void);\n");
-        } else {
-            emit(g, "static ");
-            push_text(g.out, rets);
-            emit(g, " ");
-            push_text(g.out, p.nodes[c].text);
-            emit(g, "(");
-            var c2 = p.nodes[c].first;
-            let body = p.nodes[c].last;
-            var pi: i64 = 0;
-            while c2 >= 0 && c2 != body {
-                var cn2 .= p.nodes[c2];
-                if cn2.k == ast::Nk.Param {
-                    if pi > 0 { emit(g, ", "); }
-                    let pty = nth_child(p, c2, 0);
-                    var pt: const u8[:] = "long long";
-                    if pty >= 0 { pt = ctype_of(g, text_of(p, pty)); }
-                    push_text(g.out, pt);
-                    emit(g, " ");
-                    push_text(g.out, p.nodes[c2].text);
-                    pi++;
-                }
-                c2 = cn2.next;
-            }
-            emit(g, ");\n");
-        }
-        c = cn.next;
-    }
-    emit(g, "\n");
-    c = first_child(p, root);
-    while c >= 0 {
-        var cn .= p.nodes[c];
-        for i in g.names.len { g.names.pop(); g.types.pop(); }
-        gen_fn(g, p, c);
-        if !g.ok { return; }
-        c = cn.next;
     }
 }

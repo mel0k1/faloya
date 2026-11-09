@@ -2,30 +2,106 @@ import ast;
 import cgen;
 import os;
 
-fn main() {
-    let a = args();
-    guard a.len >= 2 else { print("usage: cgendrv <in.fal> [out.c]"); return; }
-    var src: u8[>..] = [];
-    guard read_file(a[1], src) else { print("cannot read ", a[1]); return; }
-    var p: ast::Parser = ast::Parser { .. };
-    let root = ast::parse(src, p);
+fn parse_one(p: ast::Parser&, all: u8[>..]&, k: i64, starts: i64[>..]&, ends: i64[>..]&, roots: i64[>..]&) {
+    let r = ast::parse(all[starts[k]..ends[k]], p);
+    roots.push(r);
     if !p.ok {
         var m: u8[>..] = [];
         ast::error_line(p, m);
         print(m);
-        return;
+    }
+}
+
+fn bail(g: cgen::Gen&) {
+    if !g.ok {
+        var m: u8[>..] = [];
+        format(m, "cgen: line ", g.line, ": ", g.msg);
+        print(m);
+    }
+}
+
+fn main() {
+    let a = args();
+    guard a.len >= 3 else { print("usage: cgendrv <out.c> <in1.fal> <in2.fal> ... (up to 4 files)"); return; }
+    guard a.len <= 6 else { print("too many input files, up to 4 is supported"); return; }
+    var all: u8[>..] = [];
+    var starts: i64[>..] = [];
+    var ends: i64[>..] = [];
+    var i: i64 = 2;
+    while i < a.len {
+        var f: u8[>..] = [];
+        guard read_file(a[i], f) else { print("cannot read ", a[i]); return; }
+        starts.push(all.len);
+        for j in f.len { all.push(f[j]); }
+        ends.push(all.len);
+        i++;
+    }
+    var roots: i64[>..] = [];
+    var p0: ast::Parser = ast::Parser { .. };
+    parse_one(p0, all, 0, starts, ends, roots);
+    if !p0.ok { return; }
+    var p1: ast::Parser = ast::Parser { .. };
+    if starts.len >= 2 {
+        parse_one(p1, all, 1, starts, ends, roots);
+        if !p1.ok { return; }
+    }
+    var p2: ast::Parser = ast::Parser { .. };
+    if starts.len >= 3 {
+        parse_one(p2, all, 2, starts, ends, roots);
+        if !p2.ok { return; }
+    }
+    var p3: ast::Parser = ast::Parser { .. };
+    if starts.len >= 4 {
+        parse_one(p3, all, 3, starts, ends, roots);
+        if !p3.ok { return; }
     }
     var g: cgen::Gen = cgen::Gen { .. };
-    cgen::gen(g, p, root);
+    cgen::scan_file(g, p0, roots[0]);
+    bail(g);
+    if !g.ok { return; }
+    if starts.len >= 2 {
+        cgen::scan_file(g, p1, roots[1]);
+        bail(g);
+        if !g.ok { return; }
+    }
+    if starts.len >= 3 {
+        cgen::scan_file(g, p2, roots[2]);
+        bail(g);
+        if !g.ok { return; }
+    }
+    if starts.len >= 4 {
+        cgen::scan_file(g, p3, roots[3]);
+        bail(g);
+        if !g.ok { return; }
+    }
+    cgen::emit_fdecls(g);
+    cgen::emit_bodies(g, p0, roots[0]);
+    bail(g);
+    if !g.ok { return; }
+    if starts.len >= 2 {
+        cgen::emit_bodies(g, p1, roots[1]);
+        bail(g);
+        if !g.ok { return; }
+    }
+    if starts.len >= 3 {
+        cgen::emit_bodies(g, p2, roots[2]);
+        bail(g);
+        if !g.ok { return; }
+    }
+    if starts.len >= 4 {
+        cgen::emit_bodies(g, p3, roots[3]);
+        bail(g);
+        if !g.ok { return; }
+    }
     if !g.ok {
         var m: u8[>..] = [];
         format(m, "cgen: line ", g.line, ": ", g.msg);
         print(m);
         return;
     }
-    if a.len >= 3 {
-        guard write_file(a[2], g.out) else { print("cannot write ", a[2]); return; }
-        return;
-    }
-    print(g.out);
+    var final: u8[>..] = [];
+    for i2 in g.hdr.len { final.push(g.hdr[i2]); }
+    for i2 in g.aux.len { final.push(g.aux[i2]); }
+    for i2 in g.out.len { final.push(g.out[i2]); }
+    guard write_file(a[1], final) else { print("cannot write ", a[1]); return; }
 }

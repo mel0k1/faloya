@@ -21,6 +21,7 @@ struct Node { k: Nk, op: Op, at: i32, line: i32, val: i64, fval: f64, text: cons
 root struct Parser {
     toks: Tok[>..] = [], src: const u8[:] = "", pos: i64 = 0,
     ok: bool = true, err: Err = Err.None, line: i32 = 1, text: const u8[:] = "",
+    ns: const u8[:] = "",
     nodes: Node[>..] = [],
 }
 
@@ -1013,6 +1014,8 @@ recursive fn postfix(p: Parser&, tails: bool) -> i64 {
                         let hi = expr(p, 0, tails);
                         guard p.ok else { return -1; }
                         link(p, r, hi);
+                        var rn .= p.nodes[r];
+                        rn.val |= 1;
                     }
                 } else {
                     let lo = expr(p, 0, tails);
@@ -1543,7 +1546,10 @@ recursive fn fndef(p: Parser&) -> i64 {
             p.pos++;
         }
         p.pos++;
-        link(p, n, span_node(p, start, gt));
+        let graw = span_node(p, start, gt);
+        var gn .= p.nodes[graw];
+        gn.val |= 1;
+        link(p, n, graw);
     }
     guard want_punct(p, "(", Err.Paren) else { return -1; }
     if !eat_punct(p, ")") {
@@ -1748,6 +1754,7 @@ recursive fn decl(p: Parser&) -> i64 {
         let name = node(p, Nk.Name, Op.None, nt);
         var nm .= p.nodes[name];
         nm.at = nt.at;
+        nm.val = 2;
         let qt = cur(p);
         if qt.k == Tk.Punct && qt.text == "::" && peek(p).k == Tk.Ident {
             p.pos += 2;
@@ -1927,6 +1934,10 @@ fn top_decl(p: Parser&) -> i64 {
     if t.k == Tk.Kw {
         if t.text == "import" || t.text == "namespace" {
             p.pos++;
+            if t.text == "namespace" && cur(p).k == Tk.Ident {
+                p.ns = cur(p).text;
+                p.pos++;
+            }
             guard scan_semi(p) else { return fail(p, Err.Decl); }
             return -2;
         }

@@ -1,0 +1,42 @@
+fn divmod(a: i64, b: i64) -> i64, i64 {
+    return a / b, a % b;
+}
+
+fn bounds(xs: i64[:]) -> i64, i64 {
+    if xs.len == 0 { return 0, 0; }
+    var lo = xs[0];
+    var hi = xs[0];
+    for x in xs {
+        if x < lo { lo = x; }
+        if x > hi { hi = x; }
+    }
+    return lo, hi;
+}
+
+fn stats(xs: i64[:]) -> i64, i64, i64 {
+    let lo, hi = bounds(xs);
+    var s: i64 = 0;
+    for x in xs { s += x; }
+    return s, lo, hi;
+}
+
+fn swap_pair() -> i64, i64 {
+    var a: i64 = 1;
+    var b: i64 = 2;
+    return b, a;
+}
+
+fn main() {
+    let q, r = divmod(17, 5);
+    print("divmod: ", q, " ", r);
+    var x: i64 = 0;
+    var y: i64 = 0;
+    x, y = divmod(100, 7);
+    print("assign: ", x, " ", y);
+    x, y = swap_pair();
+    print("swapped: ", x, " ", y);
+    let lo, hi = bounds([3, 1, 4, 1, 5, 9, 2, 6]);
+    print("bounds: ", lo, " ", hi);
+    let sum, mn, mx = stats([4, 8, 15, 16, 23, 42]);
+    print("stats: ", sum, " ", mn, " ", mx);
+}
