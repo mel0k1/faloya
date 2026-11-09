@@ -1,0 +1,8 @@
+fn bad() -> u8[:] {
+    var local: u8[>..] = [];
+    local.append("local");
+    return local[..];
+}
+fn main() {
+    print(bad());
+}

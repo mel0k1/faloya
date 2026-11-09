@@ -1,0 +1,10 @@
+struct Named { name: u8[:] }
+fn main() {
+    var n: Named[>..] = [];
+    {
+        var tmp: u8[>..] = [];
+        tmp.append("hi");
+        n.push(Named { name: tmp[..] });
+    }
+    print(n[0].name);
+}

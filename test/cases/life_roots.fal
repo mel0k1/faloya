@@ -1,0 +1,46 @@
+struct Item { id: i32, weight: f32 }
+
+fn longest(a: u8[:], b: u8[:]) -> u8[:] { if a.len >= b.len { a } else { b } }
+
+struct Node { value: i64, next: Node&<u32 in nodes>? }
+
+var nodes: Node[>..] = [];
+
+fn walk(start: Node&<u32 in nodes>) -> i64 {
+    var total: i64 = 0;
+    var cur: Node&<u32 in nodes>? .= start;
+    while cur {
+        total += cur.value;
+        cur .= cur.next;
+    }
+    return total;
+}
+
+fn main() {
+    var items: Item[>..] = [];
+    let first .= items.push(Item { id: 1, weight: 0.5 });
+    for i: i32 in 2..100001 { items.push(Item { id: i, weight: 0.0 }); }
+    first.weight = 99.5;
+    print(items.len, " items, first is ", items[0]);
+
+    var a: u8[>..] = [];
+    a.append("short");
+    var b: u8[>..] = [];
+    b.append("much longer text");
+    let w = longest(a, b);
+    print("longest: ", w);
+
+    let tail .= nodes.push(Node { value: 30, next: null });
+    let mid .= nodes.push(Node { value: 20, next: tail });
+    let head .= nodes.push(Node { value: 10, next: mid });
+    print("walk: ", walk(head));
+
+    var xs: i64[>..] = [10, 20];
+    var ys: i64[>..] = [30, 40];
+    var r: i64& .= xs[1];
+    r = 25;
+    print("xs: ", xs, ", through r into ys:");
+    r .= ys[0];
+    r = 55;
+    print("ys: ", ys);
+}

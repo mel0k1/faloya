@@ -1,0 +1,5 @@
+fn make() -> u8[>..] { str("made") }
+fn main() {
+    let u = make()[..];
+    print(u);
+}

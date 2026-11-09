@@ -1,0 +1,9 @@
+fn main() {
+    var w: u8[:][>..] = [];
+    {
+        var inner: u8[>..] = [];
+        inner.append("inner");
+        w.push(if inner.len > 0 { inner[..] } else { "none" });
+    }
+    print(w.len, " ", w[0]);
+}

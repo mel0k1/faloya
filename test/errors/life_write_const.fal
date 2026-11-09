@@ -1,0 +1,4 @@
+fn upper(s: u8[:]) { if s.len > 0 { s[0] = 'X'; } }
+fn main() {
+    upper("literal");
+}

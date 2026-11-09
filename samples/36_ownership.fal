@@ -1,0 +1,31 @@
+import std;
+
+struct Node { value: i64, next: Node&<u32 in pool>? }
+
+var pool: Node[>..] = [];
+
+fn main() {
+    var head: Node&<u32 in pool>? = null;
+    for i: i64 in 1..8 { head .= pool.push(Node { value: i, next: head }); }
+
+    var total: i64 = 0;
+    var cur: Node&<u32 in pool>? .= head;
+    while cur {
+        total += cur.value;
+        cur .= cur.next;
+    }
+    print("list of ", pool.len, " nodes, sum ", total);
+
+    var stack: i64[>..<] = [];
+    for i: i64 in 1..6 { stack.push(i * i); }
+    var popped: i64 = 0;
+    while stack.len > 0 { popped += stack.pop(); }
+    print("popped squares: ", popped);
+
+    var a: u8[>..] = [];
+    a.append("owned");
+    var b = copy(a);
+    b.append(" twice");
+    print("a: ", a);
+    print("b: ", b);
+}

@@ -1,0 +1,1 @@
+binding u to a slice rooted at a temporary, which does not outlive it

@@ -1,0 +1,1 @@
+storing a reference rooted at inner, which does not outlive the destination
