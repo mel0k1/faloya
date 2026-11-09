@@ -621,7 +621,7 @@ fn raw_span(p: Parser&, comma: bool, paren: bool, openbrace: bool, closebrace: b
             (paren && t.text == ")") ||
             (openbrace && t.text == "{") ||
             (closebrace && t.text == "}") ||
-            t.text == "=" || t.text == ";") {
+            t.text == "=" || t.text == ".=" || t.text == ";") {
             break;
         }
         if is_p {
@@ -1418,6 +1418,27 @@ recursive fn loop_stmt(p: Parser&) -> i64 {
     return n;
 }
 
+fn raw_type_in_for(p: Parser&) -> i64 {
+    let start = p.pos;
+    let t0 = cur(p);
+    var depth: i64 = 0;
+    while true {
+        let t = cur(p);
+        if t.k == Tk.Eof { return fail(p, Err.Type); }
+        if depth == 0 && t.k == Tk.Kw && t.text == "in" { break; }
+        if depth == 0 && t.k == Tk.Punct && t.text == "," { break; }
+        if t.k == Tk.Punct {
+            if t.text == "(" || t.text == "[" || t.text == "{" || t.text == "<" { depth++; }
+            else if t.text == ")" || t.text == "]" || t.text == "}" || t.text == ">" {
+                if depth > 0 { depth--; }
+            }
+        }
+        p.pos++;
+    }
+    if p.pos == start { return fail(p, Err.Type); }
+    return span_node(p, start, t0);
+}
+
 recursive fn for_stmt(p: Parser&) -> i64 {
     let t = cur(p);
     p.pos++;
@@ -1432,6 +1453,11 @@ recursive fn for_stmt(p: Parser&) -> i64 {
         var nm .= p.nodes[name];
         if refvar { nm.val = 1; }
         refvar = false;
+        if eat_punct(p, ":") {
+            let ty = raw_type_in_for(p);
+            guard p.ok else { return -1; }
+            link(p, name, ty);
+        }
         link(p, n, name);
         if !eat_punct(p, ",") { break; }
     }

@@ -55,4 +55,57 @@ file
 
 nodes: 18 tokens: 27
 ----
+file
+  fn g
+    param a
+      raw i64[3]
+    block
+      expr
+        for
+          name x
+            raw i32
+          range ..
+            int 0
+            int 9
+          block
+            expr
+              call
+                name print
+                name x
+      expr
+        for
+          name y
+          name i
+            raw i32
+          name a
+          block
+            expr
+              call
+                name print
+                name y
+                name i
+      expr tail
+        for
+          name z ref
+          name a
+          block
+            assign +=
+              name z
+              int 1
+
+nodes: 37 tokens: 56
+----
+file
+  fn h
+    block
+      let var bind r
+        name r
+        raw i64&
+        name q
+      assign .=
+        name r
+        name s
+
+nodes: 10 tokens: 19
+----
 ast: line 1: expected a name near '{'

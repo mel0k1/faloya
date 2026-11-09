@@ -22,5 +22,9 @@ fn main() {
     print("----");
     show("fn f(xs: i32[:]) { for x in xs { if x > 0 { continue; } } }");
     print("----");
+    show("fn g(a: i64[3]) { for x: i32 in 0..9 { print(x); } for y, i: i32 in a { print(y, i); } for &z in a { z += 1; } }");
+    print("----");
+    show("fn h() { var r: i64& .= q; r .= s; }");
+    print("----");
     show("fn broken( { let = ;");
 }

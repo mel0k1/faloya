@@ -1350,6 +1350,30 @@ recursive fn expr_ty_inner(g: Gen&, p: ast::Parser&, id: i64) -> const u8[:], i6
             if cn.text == "str" {
                 return "_str", KStr, "unsigned char", KInt, 0;
             }
+            if cn.text == "copy" {
+                let a0 = nth_child(p, id, 1);
+                guard a0 >= 0 else {
+                    fail(g, "copy needs a value", p, id);
+                    return "", 0, "", 0, 0;
+                }
+                let ac, ak, ae, aek, an = expr_ty(g, p, a0);
+                guard g.ok else { return "", 0, "", 0, 0; }
+                var fc: const u8[:] = cat("", ac);
+                var fk: i64 = ak;
+                var fe: const u8[:] = cat("", ae);
+                var fek: i64 = aek;
+                if fk == KRef {
+                    fc = cat("", ae);
+                    fk = aek;
+                    fe = cat("", c_elem_of(g, ae));
+                    fek = c_kind_of(g, ae);
+                }
+                guard fk == KGrow else {
+                    fail(g, "copy supports growable arrays only yet", p, id);
+                    return "", 0, "", 0, 0;
+                }
+                return cat("", fc), fk, cat("", fe), fek, 0;
+            }
             let fnm = resolve_fn(g, cn.text);
             let fi = fn_index(g, fnm);
             guard fi >= 0 else {
@@ -1376,6 +1400,42 @@ recursive fn expr_ty_inner(g: Gen&, p: ast::Parser&, id: i64) -> const u8[:], i6
             }
             return cs, k0, e0, ek0, 0;
         }
+        if cn.k == ast::Nk.Field {
+            let base_id = nth_child(p, callee, 0);
+            let bc, bk, bec, bek, ben = expr_ty(g, p, base_id);
+            guard g.ok else { return "", 0, "", 0, 0; }
+            var gc: const u8[:] = "";
+            var ec: const u8[:] = "";
+            var ek: i64 = 0;
+            if bk == KRef {
+                guard bek == KGrow else {
+                    fail(g, "methods on this reference are not supported yet", p, id);
+                    return "", 0, "", 0, 0;
+                }
+                gc = cat("", bec);
+                ec = cat("", c_elem_of(g, bec));
+                ek = c_kind_of(g, bec);
+            } else if bk == KGrow {
+                gc = cat("", bc);
+                ec = cat("", bec);
+                ek = bek;
+            } else {
+                fail(g, "methods on this value are not supported yet", p, id);
+                return "", 0, "", 0, 0;
+            }
+            let method = cn.text;
+            if method == "push" {
+                return cat3(ec, "*", ""), KRef, cat("", ec), ek, 0;
+            }
+            if method == "pop" {
+                return cat("", ec), ek, "", 0, 0;
+            }
+            if method == "pop_n" || method == "resize" || method == "append" || method == "clear" {
+                return "void", 0, "", 0, 0;
+            }
+            fail(g, "unknown member in this position", p, id);
+            return "", 0, "", 0, 0;
+        }
         fail(g, "call of an unsupported callee", p, id);
         return "", 0, "", 0, 0;
     }
@@ -1398,6 +1458,7 @@ recursive fn expr_ty_inner(g: Gen&, p: ast::Parser&, id: i64) -> const u8[:], i6
         guard g.ok else { return "", 0, "", 0, 0; }
         let tn = cat4("_a_", tag_of(ec), "_", num_text(child_count(p, id)));
         register_typedef(g, tn, cat6("typedef struct { ", ec, " v[", num_text(child_count(p, id)), "]; } ", cat2(tn, ";")));
+        register_cc(g, tn, cat("", ec), ek2, child_count(p, id));
         return cat("", tn), KFixed, cat("", ec), ek2, child_count(p, id);
     }
     if n.k == ast::Nk.If {
@@ -1468,6 +1529,7 @@ fn view_of(g: Gen&, c: const u8[:], k: i64) -> const u8[:], i64 {
     if k == KFixed || k == KGrow {
         let tn = cat("_s_", tag_of(c_elem_of(g, c)));
         register_typedef(g, tn, cat5("typedef struct { ", c_elem_of(g, c), "* p; long long n; } ", tn, ";"));
+        register_cc(g, tn, cat("", c_elem_of(g, c)), c_kind_of(g, c), 0);
         return cat("", tn), KSlice;
     }
     return "", 0;
@@ -1515,6 +1577,15 @@ fn block_tail_value(g: Gen&, p: ast::Parser&, blk: i64) -> const u8[:] {
         return "";
     }
     return gen_expr(g, p, nth_child(p, only, 0), "", 0);
+}
+
+fn gen_operand(g: Gen&, p: ast::Parser&, id: i64, k: i64) -> const u8[:] {
+    let v = gen_expr(g, p, id, "", 0);
+    guard g.ok else { return ""; }
+    if k == KRef && p.nodes[id].k != ast::Nk.Name {
+        return cat3("(*", v, ")");
+    }
+    return v;
 }
 
 recursive fn gen_expr(g: Gen&, p: ast::Parser&, id: i64, dest: const u8[:], dkind: i64) -> const u8[:] {
@@ -1568,6 +1639,8 @@ recursive fn gen_expr(g: Gen&, p: ast::Parser&, id: i64, dest: const u8[:], dkin
         let r = nth_child(p, id, 1);
         let lc, lk, le, lek, ln = expr_ty(g, p, l);
         guard g.ok else { return ""; }
+        let rvc, rvk, rve, rvek, rvn = expr_ty(g, p, r);
+        guard g.ok else { return ""; }
         if is_container(lk) || lk == KStruct {
             if n.op != ast::Op.Eq && n.op != ast::Op.Ne {
                 fail(g, "only equality is supported on arrays and structs yet", p, id);
@@ -1598,13 +1671,15 @@ recursive fn gen_expr(g: Gen&, p: ast::Parser&, id: i64, dest: const u8[:], dkin
             fail(g, "unsupported binary operator", p, id);
             return "";
         }
-        if n.op == ast::Op.Mod && lk == KFloat {
+        var elk: i64 = lk;
+        if lk == KRef { elk = lek; }
+        if n.op == ast::Op.Mod && elk == KFloat {
             fail(g, "modulo on floats is not supported yet", p, id);
             return "";
         }
-        let lv = gen_expr(g, p, l, "", 0);
+        let lv = gen_operand(g, p, l, lk);
         guard g.ok else { return ""; }
-        let rv = gen_expr(g, p, r, "", 0);
+        let rv = gen_operand(g, p, r, rvk);
         guard g.ok else { return ""; }
         let m = spool_n;
         spool_text("(");
@@ -1626,7 +1701,9 @@ recursive fn gen_expr(g: Gen&, p: ast::Parser&, id: i64, dest: const u8[:], dkin
             fail(g, "unsupported unary operator", p, id);
             return "";
         }
-        let inner = gen_expr(g, p, c, "", 0);
+        let ckc, ckk, cke, ckek, ckn = expr_ty(g, p, c);
+        guard g.ok else { return ""; }
+        let inner = gen_operand(g, p, c, ckk);
         guard g.ok else { return ""; }
         return cat3(pre, inner, ")");
     }
@@ -2139,6 +2216,34 @@ recursive fn gen_call(g: Gen&, p: ast::Parser&, id: i64, dest: const u8[:], dkin
     if cn.text == "str" {
         return gen_str_call(g, p, id);
     }
+    if cn.text == "copy" {
+        let a0 = nth_child(p, id, 1);
+        guard a0 >= 0 else {
+            fail(g, "copy needs a value", p, id);
+            return "";
+        }
+        let vc, vk, ve, vek, vn = expr_ty(g, p, a0);
+        guard g.ok else { return ""; }
+        var fc: const u8[:] = cat("", vc);
+        var fk: i64 = vk;
+        var fe: const u8[:] = cat("", ve);
+        var fek: i64 = vek;
+        if fk == KRef {
+            fc = cat("", ve);
+            fk = vek;
+            fe = cat("", c_elem_of(g, ve));
+            fek = c_kind_of(g, ve);
+        }
+        guard fk == KGrow else {
+            fail(g, "copy supports growable arrays only yet", p, id);
+            return "";
+        }
+        emit_grow_copy(g, fe);
+        guard g.ok else { return ""; }
+        let v = gen_value(g, p, a0, fc, fk);
+        guard g.ok else { return ""; }
+        return cat5(cat4("_g_copy_", tag_of(fe), "(", v), ")", "", "", "");
+    }
     if cn.text == "args" {
         let ac, ak, ae, aek, an = ty_parse(g, p, id, "const u8[:][>..]");
         guard g.ok else { return ""; }
@@ -2302,6 +2407,42 @@ recursive fn gen_method(g: Gen&, p: ast::Parser&, id: i64, dest: const u8[:], dk
         if bkind0 == KRef { amp = "("; }
         return cat6(cat5("_g_append_", tag_of(bel), sfx, amp, ""), bpath, ", ", av, ")", "");
     }
+    if bkind == KGrow && method == "pop_n" {
+        let a0 = nth_child(p, id, 1);
+        guard a0 >= 0 else {
+            fail(g, "pop_n needs a count", p, id);
+            return "";
+        }
+        let cv = gen_expr(g, p, a0, "long long", KInt);
+        guard g.ok else { return ""; }
+        emit_grow_popn(g, bel);
+        guard g.ok else { return ""; }
+        var amp2: const u8[:] = "&";
+        if bkind0 == KRef { amp2 = ""; }
+        return cat6(cat3("_g_popn_", tag_of(bel), "("), amp2, bpath, ", ", cv, ")");
+    }
+    if bkind == KGrow && method == "resize" {
+        let a0 = nth_child(p, id, 1);
+        guard a0 >= 0 else {
+            fail(g, "resize needs a length", p, id);
+            return "";
+        }
+        let nv = gen_expr(g, p, a0, "long long", KInt);
+        guard g.ok else { return ""; }
+        var amp3: const u8[:] = "&";
+        if bkind0 == KRef { amp3 = ""; }
+        let a1 = nth_child(p, id, 2);
+        if a1 < 0 {
+            emit_grow_resize(g, bel, false);
+            guard g.ok else { return ""; }
+            return cat6(cat3("_g_resize_", tag_of(bel), "("), amp3, bpath, ", ", nv, ")");
+        }
+        let fv = gen_value(g, p, a1, bel, bek);
+        guard g.ok else { return ""; }
+        emit_grow_resize(g, bel, true);
+        guard g.ok else { return ""; }
+        return cat6(cat4("_g_resizef_", tag_of(bel), "(", amp3), bpath, ", ", nv, ", ", cat4(fv, ")", "", ""));
+    }
     let fnm = resolve_fn(g, method);
     let fi = fn_index(g, fnm);
     guard fi >= 0 else {
@@ -2395,6 +2536,34 @@ fn emit_grow_assign(g: Gen&, elem: const u8[:]) {
     emit_aux(g, cat5("static void ", key, "(_g_", tag_of(elem), "* d, _g_"));
     emit_aux(g, cat2(tag_of(elem), "* s) { d->n = 0; for (long long i = 0; i < s->n; i++) { _g_push_"));
     emit_aux(g, cat2(tag_of(elem), "(d, s->p[i]); } }\n\n"));
+}
+
+fn emit_grow_popn(g: Gen&, elem: const u8[:]) {
+    let key = cat3("_g_popn_", tag_of(elem), "");
+    guard need_helper(g, key) else { return; }
+    emit_aux(g, cat5("static void ", key, "(_g_", tag_of(elem), "* a, long long n) { if (n < 0 || n > a->n) { fprintf(stderr, \"pop_n count out of range\\n\"); exit(1); } a->n -= n; }\n\n"));
+}
+
+fn emit_grow_resize(g: Gen&, elem: const u8[:], fill: bool) {
+    var stem: const u8[:] = "_g_resize_";
+    if fill { stem = "_g_resizef_"; }
+    let key = cat3(stem, tag_of(elem), "");
+    guard need_helper(g, key) else { return; }
+    if !fill {
+        emit_aux(g, cat5("static void ", key, "(_g_", tag_of(elem), "* a, long long n) { if (n < 0 || n > a->n) { fprintf(stderr, \"resize out of range\\n\"); exit(1); } a->n = n; }\n\n"));
+        return;
+    }
+    emit_grow_push(g, elem);
+    emit_aux(g, cat5("static void ", key, "(_g_", tag_of(elem), "* a, long long n, "));
+    emit_aux(g, cat6(elem, " fill) { if (n < 0) { fprintf(stderr, \"resize to a negative length\\n\"); exit(1); } if (n < a->n) { a->n = n; return; } while (a->n < n) { _g_push_", tag_of(elem), "(a, fill); } }\n\n", "", ""));
+}
+
+fn emit_grow_copy(g: Gen&, elem: const u8[:]) {
+    let key = cat3("_g_copy_", tag_of(elem), "");
+    guard need_helper(g, key) else { return; }
+    emit_grow_push(g, elem);
+    emit_aux(g, cat5("static _g_", tag_of(elem), " ", key, "(_g_"));
+    emit_aux(g, cat6(tag_of(elem), " s) { _g_", tag_of(elem), " r; r.p = 0; r.n = 0; r.c = 0; for (long long i = 0; i < s.n; i++) { _g_push_", tag_of(elem), "(&r, s.p[i]); } return r; }\n\n"));
 }
 
 fn emit_pool(g: Gen&) {
@@ -2632,55 +2801,65 @@ recursive fn gen_print_part(g: Gen&, p: ast::Parser&, id: i64) -> const u8[:] {
     }
     let vc, vk, ve, vek, vn = expr_ty(g, p, id);
     guard g.ok else { return ""; }
-    if vk == KInt {
-        let v = gen_expr(g, p, id, "", 0);
+    var kc: const u8[:] = cat("", vc);
+    var kk: i64 = vk;
+    if vk == KRef {
+        guard vek != KRef else {
+            fail(g, "printing a reference to a reference is not supported yet", p, id);
+            return "";
+        }
+        kc = cat("", ve);
+        kk = vek;
+    }
+    if kk == KInt {
+        let v = gen_value(g, p, id, kc, KInt);
         guard g.ok else { return ""; }
-        if unsigned_ctype(vc) {
+        if unsigned_ctype(kc) {
             return cat4("printf(\"%llu\", ", v, ");\n", "");
         }
         return cat4("printf(\"%lld\", ", v, ");\n", "");
     }
-    if vk == KBool {
-        let v = gen_expr(g, p, id, "", 0);
+    if kk == KBool {
+        let v = gen_value(g, p, id, "bool", KBool);
         guard g.ok else { return ""; }
         return cat4("printf(\"%s\", (", v, ") ? \"true\" : \"false\");\n", "");
     }
-    if vk == KStr {
+    if kk == KStr {
         let v = gen_value(g, p, id, "_str", KStr);
         guard g.ok else { return ""; }
         emit_prb(g);
         guard g.ok else { return ""; }
         return cat6("_prb(", v, ".p, ", v, ".n);\n", "");
     }
-    if vk == KStruct {
-        emit_pr_struct(g, p, vc);
+    if kk == KStruct {
+        emit_pr_struct(g, p, kc);
         guard g.ok else { return ""; }
-        let v = gen_value(g, p, id, vc, KStruct);
+        let v = gen_value(g, p, id, kc, KStruct);
         guard g.ok else { return ""; }
-        return cat4(cat("_pr_", tag_of(vc)), "(", v, ");\n");
+        return cat4(cat("_pr_", tag_of(kc)), "(", v, ");\n");
     }
-    if vk == KGrow || vk == KSlice || vk == KFixed {
-        let elem = c_elem_of(g, vc);
+    if kk == KGrow || kk == KSlice || kk == KFixed {
+        let elem = c_elem_of(g, kc);
         if elem == "unsigned char" {
-            let v = gen_value(g, p, id, "", 0);
+            let v = gen_value(g, p, id, kc, kk);
             guard g.ok else { return ""; }
             emit_prb(g);
             guard g.ok else { return ""; }
             return cat6("_prb(", v, ".p, ", v, ".n);\n", "");
         }
         var hkey: const u8[:] = "";
-        if vk == KGrow {
-            emit_pr_grow(g, p, vc);
-            hkey = cat3("_pr_", tag_of(vc), "_g(");
-        } else if vk == KSlice {
-            emit_pr_slice(g, p, vc);
-            hkey = cat3("_pr_", tag_of(vc), "_s(");
+        if kk == KGrow {
+            emit_pr_grow(g, p, kc);
+            hkey = cat3("_pr_", tag_of(kc), "_g(");
+        } else if kk == KSlice {
+            emit_pr_slice(g, p, kc);
+            hkey = cat3("_pr_", tag_of(kc), "_s(");
         } else {
-            emit_pr_fixed(g, p, vc);
-            hkey = cat3("_pr_", tag_of(vc), "_a(");
+            emit_pr_fixed(g, p, kc);
+            hkey = cat3("_pr_", tag_of(kc), "_a(");
         }
         guard g.ok else { return ""; }
-        let v = gen_value(g, p, id, "", 0);
+        let v = gen_value(g, p, id, kc, kk);
         guard g.ok else { return ""; }
         return cat3(hkey, v, ");\n");
     }
@@ -3394,135 +3573,248 @@ fn gen_if(g: Gen&, p: ast::Parser&, id: i64, tail: bool, depth: i64, rets: const
     emit(g, "}\n");
 }
 
+fn for_type_of(g: Gen&, p: ast::Parser&, nameid: i64) -> const u8[:], i64, bool {
+    let tchild = p.nodes[nameid].first;
+    guard tchild >= 0 && p.nodes[tchild].k == ast::Nk.Raw else { return "", 0, false; }
+    let c, k, e, ek, n = ty_parse(g, p, tchild, p.nodes[tchild].text);
+    guard g.ok else { return "", 0, false; }
+    return cat("", c), k, true;
+}
+
 fn gen_for(g: Gen&, p: ast::Parser&, id: i64, depth: i64, rets: const u8[:], fi: i64) {
     guard g.ok else { return; }
     var n .= p.nodes[id];
-    let name = nth_child(p, id, 0);
-    let seq = nth_child(p, id, 1);
-    let body = nth_child(p, id, 2);
-    var names .= p.nodes[name];
-    if is_c_keyword(names.text) {
+    let name1 = nth_child(p, id, 0);
+    var name2: i64 = -1;
+    var seqid: i64 = nth_child(p, id, 1);
+    var bodyid: i64 = nth_child(p, id, 2);
+    if child_count(p, id) == 4 {
+        name2 = seqid;
+        seqid = nth_child(p, id, 2);
+        bodyid = nth_child(p, id, 3);
+    }
+    var n1 .= p.nodes[name1];
+    if is_c_keyword(n1.text) {
         fail(g, "the loop name clashes with a C keyword", p, id);
         return;
     }
-    var sn .= p.nodes[seq];
-    if sn.k == ast::Nk.Range {
-        let lo = nth_child(p, seq, 0);
-        let hi = nth_child(p, seq, 1);
-        guard hi >= 0 else {
-            fail(g, "this range has no end", p, id);
-            return;
-        }
-        g.tmp++;
-        let gcn = declare(g, names.text, "long long", KInt, "", 0);
-        emit_indent(g, depth);
-        let endname = cat("__cgen_end_", num_text(g.tmp));
-        emit(g, "for (long long ");
-        push_text(g.out, gcn);
-        emit(g, " = ");
-        let lbuf = gen_expr(g, p, lo, "long long", KInt);
-        if !g.ok { return; }
-        emit(g, lbuf);
-        emit(g, ", ");
-        emit(g, endname);
-        emit(g, " = ");
-        let hbuf = gen_expr(g, p, hi, "long long", KInt);
-        if !g.ok { return; }
-        emit(g, hbuf);
-        emit(g, "; ");
-        push_text(g.out, gcn);
-        emit(g, " < ");
-        emit(g, endname);
-        emit(g, "; ");
-        push_text(g.out, gcn);
-        emit(g, "++) {\n");
-        gen_block(g, p, body, depth + 1, rets, false, false, fi);
-        if !g.ok { return; }
-        emit_indent(g, depth);
-        emit(g, "}\n");
+    if name2 >= 0 && is_c_keyword(p.nodes[name2].text) {
+        fail(g, "the loop index name clashes with a C keyword", p, id);
         return;
     }
-    let sc, sk, se, sek, sn2 = expr_ty(g, p, seq);
-    if !g.ok { return; }
-    if sk == KInt {
+    var bc: const u8[:] = "";
+    var bk: i64 = 0;
+    var typed1 = false;
+    {
+        let c1, k1, t1 = for_type_of(g, p, name1);
+        guard g.ok else { return; }
+        bc = c1;
+        bk = k1;
+        typed1 = t1;
+    }
+    var ic: const u8[:] = "";
+    var ik: i64 = 0;
+    var typed2 = false;
+    if name2 >= 0 {
+        let c2, k2, t2 = for_type_of(g, p, name2);
+        guard g.ok else { return; }
+        ic = c2;
+        ik = k2;
+        typed2 = t2;
+    }
+    var sn .= p.nodes[seqid];
+    var sc: const u8[:] = "";
+    var sk: i64 = 0;
+    var se: const u8[:] = "";
+    var sek: i64 = 0;
+    if sn.k != ast::Nk.Range {
+        let sc2, sk2, se2, sek2, sn2 = expr_ty(g, p, seqid);
+        if !g.ok { return; }
+        sc = cat("", sc2);
+        sk = sk2;
+        se = cat("", se2);
+        sek = sek2;
+    }
+    if sn.k == ast::Nk.Range || sk == KInt {
+        guard name2 < 0 || !typed2 else {
+            fail(g, "the index of a range or count counts its iterations as an i64", p, id);
+            return;
+        }
+        guard !typed1 || bk == KInt else {
+            fail(g, "a range or count loop's binder takes an integer type", p, id);
+            return;
+        }
+        var bcc: const u8[:] = "long long";
+        if typed1 { bcc = cat("", bc); }
         g.tmp++;
-        let gcn = declare(g, names.text, "long long", KInt, "", 0);
-        emit_indent(g, depth);
         let endname = cat("__cgen_end_", num_text(g.tmp));
+        let ctrname = cat("__cgen_ctr_", num_text(g.tmp));
+        let ixname = cat("__cgen_ix_", num_text(g.tmp));
+        let gcn = declare(g, n1.text, cat("", bcc), KInt, "", 0);
+        var gix: const u8[:] = "";
+        if name2 >= 0 { gix = declare(g, p.nodes[name2].text, "long long", KInt, "", 0); }
+        var counter: const u8[:] = cat("", ctrname);
+        if !typed1 { counter = cat("", gcn); }
+        var needix = name2 >= 0 && sn.k == ast::Nk.Range;
+        emit_indent(g, depth);
         emit(g, "{ long long ");
         emit(g, endname);
         emit(g, " = ");
-        let sbuf = gen_expr(g, p, seq, "long long", KInt);
-        if !g.ok { return; }
-        emit(g, sbuf);
-        emit(g, "; for (long long ");
-        push_text(g.out, gcn);
-        emit(g, " = 0; ");
-        push_text(g.out, gcn);
+        if sn.k == ast::Nk.Range {
+            let hi = nth_child(p, seqid, 1);
+            guard hi >= 0 else {
+                fail(g, "this range has no end", p, id);
+                return;
+            }
+            let hbuf = gen_expr(g, p, hi, "long long", KInt);
+            if !g.ok { return; }
+            emit(g, hbuf);
+        } else {
+            let sbuf = gen_expr(g, p, seqid, "long long", KInt);
+            if !g.ok { return; }
+            emit(g, sbuf);
+        }
+        emit(g, ";\n");
+        if needix {
+            emit_indent(g, depth);
+            emit(g, "long long ");
+            emit(g, ixname);
+            emit(g, " = 0;\n");
+        }
+        emit_indent(g, depth);
+        emit(g, "for (long long ");
+        push_text(g.out, counter);
+        emit(g, " = ");
+        if sn.k == ast::Nk.Range {
+            let lo = nth_child(p, seqid, 0);
+            let lbuf = gen_expr(g, p, lo, "long long", KInt);
+            if !g.ok { return; }
+            emit(g, lbuf);
+        } else {
+            emit(g, "0");
+        }
+        emit(g, "; ");
+        push_text(g.out, counter);
         emit(g, " < ");
         emit(g, endname);
         emit(g, "; ");
-        push_text(g.out, gcn);
-        emit(g, "++) {\n");
-        gen_block(g, p, body, depth + 1, rets, false, false, fi);
+        push_text(g.out, counter);
+        if needix {
+            emit(g, "++, ");
+            emit(g, ixname);
+            emit(g, "++) {\n");
+        } else {
+            emit(g, "++) {\n");
+        }
+        if typed1 {
+            emit_indent(g, depth + 1);
+            push_text(g.out, bcc);
+            emit(g, " ");
+            push_text(g.out, gcn);
+            emit(g, " = (");
+            push_text(g.out, bcc);
+            emit(g, ")");
+            push_text(g.out, counter);
+            emit(g, ";\n");
+        }
+        if name2 >= 0 {
+            emit_indent(g, depth + 1);
+            emit(g, "long long ");
+            push_text(g.out, gix);
+            emit(g, " = ");
+            if needix { emit(g, ixname); } else { push_text(g.out, counter); }
+            emit(g, ";\n");
+        }
+        gen_block(g, p, bodyid, depth + 1, rets, false, false, fi);
         if !g.ok { return; }
         emit_indent(g, depth);
         emit(g, "}\n}\n");
         return;
     }
-    if sk == KSlice || sk == KGrow || sk == KStr {
+    if sk == KFixed || sk == KSlice || sk == KStr || sk == KGrow {
+        guard !typed1 else {
+            fail(g, "an array's element binds at its element type", p, id);
+            return;
+        }
+        guard name2 < 0 || !typed2 || ik == KInt else {
+            fail(g, "a loop's index takes an integer type", p, id);
+            return;
+        }
+        var byref = (n1.val & 1) != 0;
+        if !byref && (sek == KStr || sek == KGrow) { byref = true; }
+        var bc2: const u8[:] = "";
+        var bk2: i64 = 0;
+        if byref {
+            bc2 = cat3(se, "*", "");
+            bk2 = KRef;
+        } else {
+            bc2 = cat("", se);
+            bk2 = sek;
+        }
+        var inplace = byref && (sk == KFixed || sk == KGrow);
+        if inplace && sn.k != ast::Nk.Name && sn.k != ast::Nk.Field {
+            fail(g, "a byref loop needs a named array to write through yet", p, id);
+            return;
+        }
         g.tmp++;
         let itname = cat("__cgen_it_", num_text(g.tmp));
-        let gcn = declare(g, names.text, se, sek, "", 0);
+        let gcn = declare(g, n1.text, bc2, bk2, cat("", se), sek);
+        var gix: const u8[:] = "";
+        if name2 >= 0 { gix = declare(g, p.nodes[name2].text, cat("", ic), ik, "", 0); }
+        var place: const u8[:] = cat("", itname);
         emit_indent(g, depth);
         emit(g, "{ ");
-        push_text(g.out, sc);
-        emit(g, " ");
-        emit(g, itname);
-        emit(g, " = ");
-        let sbuf = gen_value(g, p, seq, sc, sk);
-        if !g.ok { return; }
-        emit(g, sbuf);
-        emit(g, "; for (long long __i = 0; __i < ");
-        emit(g, itname);
-        emit(g, ".n; __i++) {\n");
-        emit_indent(g, depth + 1);
-        push_text(g.out, se);
-        emit(g, " ");
-        push_text(g.out, gcn);
-        emit(g, " = ");
-        emit(g, itname);
-        emit(g, ".p[__i];\n");
-        gen_block(g, p, body, depth + 1, rets, false, false, fi);
-        if !g.ok { return; }
-        emit_indent(g, depth);
-        emit(g, "}\n}\n");
-        return;
-    }
-    if sk == KFixed {
-        g.tmp++;
-        let itname = cat("__cgen_it_", num_text(g.tmp));
-        let gcn = declare(g, names.text, se, sek, "", 0);
-        emit_indent(g, depth);
-        emit(g, "{ ");
-        push_text(g.out, sc);
-        emit(g, " ");
-        emit(g, itname);
-        emit(g, " = ");
-        let sbuf = gen_value(g, p, seq, sc, sk);
-        if !g.ok { return; }
-        emit(g, sbuf);
-        emit(g, "; for (long long __i = 0; __i < ");
-        emit(g, num_text(c_size_of(g, sc)));
+        if !inplace {
+            push_text(g.out, sc);
+            emit(g, " ");
+            emit(g, itname);
+            emit(g, " = ");
+            let sbuf = gen_value(g, p, seqid, sc, sk);
+            if !g.ok { return; }
+            emit(g, sbuf);
+            emit(g, "; ");
+        } else {
+            let dp, dk2, dc2, de2, dek2 = gen_path(g, p, seqid);
+            if !g.ok { return; }
+            place = dp;
+        }
+        emit(g, "for (long long __i = 0; __i < ");
+        if sk == KFixed {
+            emit(g, num_text(c_size_of(g, sc)));
+        } else {
+            if inplace { push_text(g.out, place); } else { emit(g, itname); }
+            emit(g, ".n");
+        }
         emit(g, "; __i++) {\n");
+        if name2 >= 0 {
+            emit_indent(g, depth + 1);
+            if typed2 {
+                push_text(g.out, ic);
+                emit(g, " ");
+                push_text(g.out, gix);
+                emit(g, " = (");
+                push_text(g.out, ic);
+                emit(g, ")__i;\n");
+            } else {
+                emit(g, "long long ");
+                push_text(g.out, gix);
+                emit(g, " = __i;\n");
+            }
+        }
         emit_indent(g, depth + 1);
-        push_text(g.out, se);
+        push_text(g.out, bc2);
         emit(g, " ");
         push_text(g.out, gcn);
         emit(g, " = ");
-        emit(g, itname);
-        emit(g, ".v[__i];\n");
-        gen_block(g, p, body, depth + 1, rets, false, false, fi);
+        if byref { emit(g, "&"); }
+        if inplace { push_text(g.out, place); } else { emit(g, itname); }
+        if sk == KFixed {
+            emit(g, ".v[__i]");
+        } else {
+            emit(g, ".p[__i]");
+        }
+        emit(g, ";\n");
+        gen_block(g, p, bodyid, depth + 1, rets, false, false, fi);
         if !g.ok { return; }
         emit_indent(g, depth);
         emit(g, "}\n}\n");

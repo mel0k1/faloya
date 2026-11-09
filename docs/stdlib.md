@@ -1364,8 +1364,9 @@ array literals (including `[value; count]` fills and `..` spreads), indexing
 with ranges and `^` from-the-end indexing. Statements cover `let` and `var`
 (single names, lists, qualified names, forms without an initializer),
 assignments in every compound form, multi-target assignments, `if`/`else if`
-chains, `while`, `loop`, `for` (with several loop variables and `&`
-bindings), `guard` with and without `else`, `return` with several values and
+chains, `while`, `loop`, `for` (with several loop variables, `&`
+bindings, and explicit binder types such as `for x: i32 in 0..9`),
+`guard` with and without `else`, `return` with several values and
 `return ... from`, `break`, `continue`, `defer`, nested `fn` and `thread_fn`
 definitions, and `match` as a statement and as an expression, with variant,
 binding, literal and range patterns.
@@ -3048,14 +3049,26 @@ python3 scripts/tree_diff.py
 ### cgen: the C generator
 
 The second step of the self-hosting plan: `stdlib/cgen` turns the `ast`
-package's tree into C text. The first slice covers integer types and `bool`,
-literals, arithmetic with every operator through parenthesization, `let` and
-`var` with type inference, compound assignments and `++`, `if`/`else
-if`/`else`, `while`, `for` over a range with its bound evaluated once,
-`return`, `break`, `continue`, calls to the program's own functions, and
-printing through `printf` (strings, integers and `bool`, including
-`${...}` parts). Everything else is rejected with a message and a line
-number.
+package's tree into C text. The base covers integer types and `bool`,
+literals, arithmetic with every operator through parenthesization, `let`
+and `var` with type inference, compound assignments and `++`,
+`if`/`else if`/`else`, `while`, `for` over a range with its bound
+evaluated once, `return`, `break`, `continue`, calls to the program's own
+functions, and printing through `printf` (strings, integers and `bool`,
+including `${...}` parts).
+
+The next slice adds data and references: fixed-length arrays, growable
+arrays and slices; growable arrays take `push`, `pop`, `pop_n`,
+`resize`, `append` and `clear`, including through a reference to the
+array, and `copy(a)` emits a `_g_copy_<type>` helper that copies arrays
+of any element type, structures included. References dereference in
+arithmetic and printing, and writes and `.=` work through a reference to
+an array. `for` loops accept explicit binder types: `for x: i32 in
+0..9` over a range, `for x: u8 in 2` over a count, `for v, i: i32 in a`
+with an index, and `for &x in a` writing through the binder over fixed
+and growable arrays. Structures, strings and multi-returns work under
+the same rules the compiler enforces. Everything else is rejected with a
+message and a line number.
 
 ```goose
 import ast;
@@ -3067,6 +3080,12 @@ var g: cgen::Gen = cgen::Gen { .. };
 cgen::gen(g, p, root);          // g.out: u8[>..] holding the C text
 ```
 
-The driver `test/cgen/drv.fal` reads a file and prints the C, and
-`test/cgen/run.py` generates, compiles with the system `cc` and compares
-against `faloya run` for every case in `test/cgen/*.fal`.
+The driver `test/cgen/drv.fal` reads a file and prints the C; with a
+single argument it prints the canonical parse tree, so the same binary
+serves as `astdump` for `scripts/tree_diff.py`. `test/cgen/run.py`
+generates, compiles with the system `cc` and compares against `faloya
+run` for every case in `test/cgen/*.fal`. It then translates `ast.fal`,
+`cgen.fal` and the driver itself into one C file, compiles it and runs
+every case through the resulting binary; the second pass checks that
+translating again reproduces the same file byte for byte: the generator
+reproduces itself.

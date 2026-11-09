@@ -1,0 +1,24 @@
+fn main() {
+    var a: i64[>..] = [1, 2, 3];
+    a.push(4);
+    print("after push ", a.len, " ", a[3]);
+    print("pop ", a.pop(), " left ", a.len);
+    a.append([5, 6]);
+    print("append ", a.len, " ", a[4]);
+    a.pop_n(2);
+    print("pop_n ", a.len, " tail ", a[1]);
+    a.resize(5, 7);
+    print("grow-fill ", a.len, " ", a[3], " ", a[4]);
+    a.resize(2);
+    print("shrink ", a.len, " ", a[1]);
+    var b = copy(a);
+    b.push(42);
+    print("copy ", a.len, " ", b.len, " ", b[2]);
+    b.clear();
+    print("clear ", b.len);
+    var r: i64[>..]& .= a;
+    r.push(9);
+    print("ref push ", a.len, " ", a[2]);
+    r.resize(1);
+    print("ref resize ", a.len, " ", a[0]);
+}

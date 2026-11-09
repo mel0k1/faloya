@@ -20,8 +20,28 @@ fn bail(g: cgen::Gen&) {
     }
 }
 
+fn dump_one(src: const u8[:]) {
+    var p: ast::Parser = ast::Parser { .. };
+    let root = ast::parse(src, p);
+    if !p.ok {
+        var m: u8[>..] = [];
+        ast::error_line(p, m);
+        print(m);
+        return;
+    }
+    var out: u8[>..] = [];
+    ast::dump(p, root, 0, out);
+    print(out);
+}
+
 fn main() {
     let a = args();
+    if a.len == 2 {
+        var f: u8[>..] = [];
+        guard read_file(a[1], f) else { print("cannot read ", a[1]); return; }
+        dump_one(f);
+        return;
+    }
     guard a.len >= 3 else { print("usage: cgendrv <out.c> <in1.fal> <in2.fal> ... (up to 4 files)"); return; }
     guard a.len <= 6 else { print("too many input files, up to 4 is supported"); return; }
     var all: u8[>..] = [];

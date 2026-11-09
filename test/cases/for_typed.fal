@@ -1,0 +1,24 @@
+fn sum_upto(n: i32) -> i64 {
+    var s: i64 = 0;
+    for x: i32 in 0..n { s += x; }
+    s
+}
+
+fn main() {
+    for x: i32 in 0..3 { print("t ", x); }
+    for x: u8 in 2 { print("c ", x); }
+    for x, i in 0..2 { print("r ", i, " ", x); }
+    var f: i64[3] = [5, 6, 7];
+    for x, i in f { print("f ", i, " ", x); }
+    for x, i: i32 in f { print("fi ", i, " ", x); }
+    for &x in f { x = x * 10; }
+    print("ref fixed: ", f[0], " ", f[2]);
+    var g: i64[>..] = [1, 2, 3];
+    for &x in g { x = x + 1; }
+    print("ref grow: ", g[0], " ", g[2]);
+    var w: const u8[:][3] = ["aa", "b", "ccc"];
+    for word, i in w { print("w ", i, " ", word, " ", word.len); }
+    print("sum: ", sum_upto(5));
+    var bs: i64[:] = g[0..2];
+    for v, i in bs { print("s ", i, " ", v); }
+}
