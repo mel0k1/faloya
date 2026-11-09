@@ -1449,11 +1449,13 @@ recursive fn expr_ty_inner(g: Gen&, p: ast::Parser&, id: i64) -> const u8[:], i6
         }
         let lc, lk, le, lek, ln = expr_ty(g, p, nth_child(p, id, 0));
         guard g.ok else { return "", 0, "", 0, 0; }
+        if lk == KRef { return cat("", le), lek, cat("", le), lek, ln; }
         return lc, lk, le, lek, ln;
     }
     if n.k == ast::Nk.Un {
         let c0, k0, e0, ek0, n0 = expr_ty(g, p, nth_child(p, id, 0));
         guard g.ok else { return "", 0, "", 0, 0; }
+        if k0 == KRef { return cat("", e0), ek0, cat("", e0), ek0, n0; }
         return c0, k0, e0, ek0, n0;
     }
     fail(g, "cannot infer the type of this expression", p, id);
@@ -2378,6 +2380,9 @@ fn emit_grow_pop(g: Gen&, elem: const u8[:]) {
 fn emit_grow_append(g: Gen&, elem: const u8[:], view: const u8[:], sfx: const u8[:]) {
     let key = cat3("_g_append_", tag_of(elem), sfx);
     guard need_helper(g, key) else { return; }
+    if view == "_str" {
+        register_typedef(g, "_str", "typedef struct { const unsigned char* p; long long n; } _str;");
+    }
     emit_grow_push(g, elem);
     emit_aux(g, cat5("static void ", key, "(_g_", tag_of(elem), "* a, "));
     emit_aux(g, cat4(view, " s) { for (long long i = 0; i < s.n; i++) { _g_push_", tag_of(elem), "(a, s.p[i]); } }\n\n"));
@@ -3248,6 +3253,63 @@ fn gen_assign(g: Gen&, p: ast::Parser&, id: i64, tail: bool, depth: i64, rets: c
     let lval = nth_child(p, id, 0);
     let pt, pk, pc, pe, pek = gen_path(g, p, lval);
     if !g.ok { return; }
+    if n.op == ast::Op.Bind {
+        let rhs = nth_child(p, id, 1);
+        guard rhs >= 0 else {
+            fail(g, "malformed rebind", p, id);
+            return;
+        }
+        var rc .= p.nodes[rhs];
+        emit_indent(g, depth);
+        push_text(g.out, pt);
+        emit(g, " = ");
+        if rc.k == ast::Nk.Name && rc.text == "null" {
+            emit(g, "NULL;\n");
+            return;
+        }
+        if rc.k == ast::Nk.Call {
+            let e = gen_expr(g, p, rhs, "", 0);
+            if !g.ok { return; }
+            let vc, vk, ve, vek, vn = expr_ty(g, p, rhs);
+            if !g.ok { return; }
+            guard vk == KRef else {
+                fail(g, "a rebind takes a reference or null", p, id);
+                return;
+            }
+            push_text(g.out, e);
+            emit(g, ";\n");
+            return;
+        }
+        let qt, qk, qc, qe, qek = gen_path(g, p, rhs);
+        if !g.ok { return; }
+        guard qk == KRef || qk == KInt || qk == KBool || qk == KFloat || qk == KStruct || qk == KFixed else {
+            fail(g, "a rebind to this target is not supported yet", p, id);
+            return;
+        }
+        if qk == KRef { push_text(g.out, qt); }
+        else {
+            emit(g, "&");
+            push_text(g.out, qt);
+        }
+        emit(g, ";\n");
+        return;
+    }
+    var lv: const u8[:] = "";
+    var dc: const u8[:] = "";
+    var dk: i64 = 0;
+    if pk == KRef {
+        guard pek != KGrow else {
+            fail(g, "assigning a whole grow array through a reference is not supported yet", p, id);
+            return;
+        }
+        lv = cat3("(*", pt, ")");
+        dc = cat("", pe);
+        dk = pek;
+    } else {
+        lv = cat("", pt);
+        dc = cat("", pc);
+        dk = pk;
+    }
     var op: const u8[:] = "";
     var inc = false;
     if n.val == 1 && child_count(p, id) == 1 {
@@ -3283,10 +3345,10 @@ fn gen_assign(g: Gen&, p: ast::Parser&, id: i64, tail: bool, depth: i64, rets: c
             emit(g, ");\n");
             return;
         }
-        let e = gen_value(g, p, rhs, pc, pk);
+        let e = gen_value(g, p, rhs, dc, dk);
         if !g.ok { return; }
         emit_indent(g, depth);
-        push_text(g.out, pt);
+        push_text(g.out, lv);
         emit(g, " ");
         push_text(g.out, op);
         emit(g, " ");
@@ -3295,7 +3357,7 @@ fn gen_assign(g: Gen&, p: ast::Parser&, id: i64, tail: bool, depth: i64, rets: c
         return;
     }
     emit_indent(g, depth);
-    push_text(g.out, pt);
+    push_text(g.out, lv);
     emit(g, " ");
     push_text(g.out, op);
     emit(g, ";\n");

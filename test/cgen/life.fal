@@ -1,0 +1,22 @@
+fn bump(r: i64&) { r = r + 1; }
+
+fn main() {
+    var xs: i64[>..] = [];
+    xs.push(10);
+    xs.push(20);
+    let first .= xs[0];
+    for i in 0..1000 { xs.push(i); }
+    print("len: ", xs.len, " first: ", xs[0]);
+    bump(first);
+    print("after bump: ", xs[0]);
+
+    var r .= xs[0];
+    r .= xs[1];
+    r = 99;
+    print("rebound: ", xs[1]);
+
+    var a: u8[>..] = [];
+    a.append("own");
+    a.append("ed");
+    print("a: ", a, " len: ", a.len);
+}
