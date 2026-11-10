@@ -1591,10 +1591,11 @@ struct SStruct {
 
 struct SVariant {
     string_view name;
-    Line line;                  
-    string_view doc;            
+    Line line;
+    string_view doc;
     vector<Field> fields;
-    bool has_payload = false;   
+    bool has_payload = false;
+    string_view src;
 };
 
 struct SEnum {

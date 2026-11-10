@@ -1375,8 +1375,15 @@ Interpolation parses into the same `str(...)` call the compiler builds: the
 string splits into text parts and expressions, and nested interpolations
 become nested calls. `guard` expands into an `if` over a block holding the
 rest of the statements, `x |> f(y)` becomes `f(x, y)`, and closures in a
-call's trailing block become `closure` nodes with parameters. `const
-for`/`const if` expansion is not covered yet.
+call's trailing block become `closure` nodes with parameters.
+
+`const for` and `const if` parse in all three forms the compiler accepts:
+a statement with a block, a `match` arms fragment, and a struct literal
+initializer fragment, including `else const if` chains. Their contents are
+checked for structure, and the tree holds one line, `!! unsupported-stmt`
+or `!! unsupported-expr` with the kind number, exactly what the compiler's
+dump prints: expansion happens at type checking, so the raw parse does not
+show the fragment.
 
 ### Nodes and the dump
 

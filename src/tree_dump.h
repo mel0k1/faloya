@@ -179,32 +179,6 @@ inline void TreeField(string &s, int ind, const Field &f) {
     if (f.defaultval) TreeExpr(s, f.defaultval, ind + 1);
 }
 
-inline void TreeEnumFields(int ind, const vector<Field> &fs, string &t) {
-    for (size_t i = 0; i < fs.size(); i++) {
-        if (i) t += ", ";
-        auto &f = fs[i];
-        if (f.ispad) {
-            t += "pad";
-            if (f.padsize >= 0) Append(t, " ", f.padsize);
-            continue;
-        }
-        auto sugar = f.isconst && f.type->cq;
-        if (f.isconst) t += sugar ? "const " : "let ";
-        t += f.name;
-        t += ": ";
-        if (sugar) {
-            TypeExpr plain = *f.type;
-            plain.cq = false;
-            plain.Dump(t, (size_t)-1);
-        } else {
-            string tmp;
-            TreeFieldType(tmp, f);
-            t += tmp;
-        }
-    }
-}
-
-
 inline void TreeParams(string &s, const vector<Param> &ps, int ind) {
     for (auto &p : ps) {
         TNl(s, ind);
@@ -252,15 +226,7 @@ inline void TreeEnum(string &s, const EnumDecl *ed, int ind) {
     TNl(s, ind);
     Append(s, "enum ", ed->en->name);
     TreeGenerics(s, ed->en->generics, ind + 1);
-    for (auto &v : ed->en->variants) {
-        string t = string(v.name);
-        if (v.has_payload) {
-            t += " { ";
-            TreeEnumFields(ind, v.fields, t);
-            t += " }";
-        }
-        TreeRawLine(s, ind + 1, t);
-    }
+    for (auto &v : ed->en->variants) TreeRawLine(s, ind + 1, string(v.src));
 }
 
 inline void TreeVarDecl(string &s, const VarDecl *vd, int ind) {

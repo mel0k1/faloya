@@ -26,5 +26,13 @@ fn main() {
     print("----");
     show("fn h() { var r: i64& .= q; r .= s; }");
     print("----");
+    show("fn a(n: i64) { const for <C> in [3, 4] { print(C); } const if true { print(1); } else const if n > 0 { print(2); } else { print(0); } }");
+    print("----");
+    show("fn b<E>(v: E) { match v { const for <N, V> in variants<E> { V => print(N) }, _ => {} } }");
+    print("----");
+    show("fn c(p: Point) -> Point { Point { const for <N, A> in fields<Point> { A: p.A, } } }");
+    print("----");
+    show("fn d(n: i64) { match n { -3..-1 => print(1), 5, 7 => print(2), 'x' => print(3), other => print(other), } }");
+    print("----");
     show("fn broken( { let = ;");
 }

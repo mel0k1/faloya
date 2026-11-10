@@ -108,4 +108,77 @@ file
 
 nodes: 10 tokens: 19
 ----
+file
+  fn a
+    param n
+      raw i64
+    block
+      !! unsupported-stmt 24
+      !! unsupported-stmt 25
+
+nodes: 29 tokens: 59
+----
+file
+  fn b
+    raw <E>
+    param v
+      raw E
+    block
+      expr tail
+        match
+          name v
+          arm wild
+          arm wild
+            block
+
+nodes: 18 tokens: 42
+----
+file
+  fn c
+    param p
+      raw Point
+    raw Point
+    block
+      expr tail
+        lit
+          name Point
+          fld
+            !! unsupported-expr 24
+
+nodes: 13 tokens: 35
+----
+file
+  fn d
+    param n
+      raw i64
+    block
+      expr tail
+        match
+          name n
+          arm
+            range ..
+              int -3
+              int -1
+            call
+              name print
+              int 1
+          arm
+            int 5
+            int 7
+            call
+              name print
+              int 2
+          arm
+            int 120
+            call
+              name print
+              int 3
+          arm
+            name other
+            call
+              name print
+              name other
+
+nodes: 31 tokens: 48
+----
 ast: line 1: expected a name near '{'

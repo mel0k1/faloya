@@ -647,6 +647,7 @@ struct Parser {
             Expect(T_LCURLY, "enum declaration");
             while (lex.tok != T_RCURLY) {
                 SVariant v;
+                auto vstart = lex.attr.data();
                 v.line = CurLine();
                 v.doc = lex.doc;
                 v.name = ExpectIdent("enum variant");
@@ -659,6 +660,7 @@ struct Parser {
                     ParseFieldList(v.fields, "variant body");
                     Expect(T_RCURLY, "enum variant");
                 }
+                v.src = string_view(vstart, lex.prevend - vstart);
                 en->variants.push_back(v);
                 KeepMember(&kept);
                 if (!IsNext(T_COMMA)) break;

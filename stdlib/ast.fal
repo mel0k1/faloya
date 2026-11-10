@@ -12,7 +12,7 @@ enum Nk {
     File, Fn, Param, Raw, Block, Closure, Fld, Lit, Arr, Defer, Match, Arm,
     Let, Assign, If, While, Loop, For, Guard, Return, Break, Continue, Expr,
     Int, Float, Str, Char, Name, Bin, Un, Call, Index, Field, As, Range,
-    Struct, Enum, Alias,
+    Struct, Enum, Alias, ConstFor, ConstIf,
 }
 enum Err { None, Expr, Name, Stmt, Block, Semi, Paren, Bracket, Brace, Colon, Init, Type, Decl, Token }
 
@@ -535,6 +535,11 @@ fn want_punct(p: Parser&, what: const u8[:], e: Err) -> bool {
     return false;
 }
 
+fn failb(p: Parser&, e: Err) -> bool {
+    fail(p, e);
+    return false;
+}
+
 fn eat_kw(p: Parser&, what: const u8[:]) -> bool {
     let t = cur(p);
     if t.k == Tk.Kw && t.text == what { p.pos++; return true; }
@@ -892,6 +897,22 @@ recursive fn struct_lit(p: Parser&, x: i64, g: i64, t: Tok) -> i64 {
         let ft = cur(p);
         let nt = peek(p);
         var f = -1;
+        if ft.k == Tk.Kw && ft.text == "const" && nt.k == Tk.Kw
+            && (nt.text == "for" || nt.text == "if") {
+            let frag = if nt.text == "for" { const_for(p, 2) } else { const_if(p, 2) };
+            guard p.ok else { return -1; }
+            var fnn .= p.nodes[frag];
+            fnn.val |= 1;
+            let et = Tok { k: Tk.Punct, at: ft.at, line: ft.line, text: p.src[ft.at..ft.at] };
+            f = node(p, Nk.Fld, Op.None, et);
+            link(p, f, frag);
+            link(p, n, f);
+            if eat_punct(p, ",") {
+                if eat_punct(p, "}") { return n; }
+                continue;
+            }
+            break;
+        }
         if ft.k == Tk.Ident && nt.k == Tk.Punct && nt.text == ":" {
             p.pos += 2;
             f = node(p, Nk.Fld, Op.None, ft);
@@ -1282,6 +1303,11 @@ recursive fn stmt(p: Parser&) -> i64 {
     let t = cur(p);
     if t.k == Tk.Kw {
         if t.text == "let" || t.text == "var" || t.text == "const" || t.text == "reusable" {
+            if t.text == "const" {
+                let nt = peek(p);
+                if nt.k == Tk.Kw && nt.text == "for" { return const_for(p, 0); }
+                if nt.k == Tk.Kw && nt.text == "if" { return const_if(p, 0); }
+            }
             return decl(p);
         }
         if t.text == "defer" { return defer_stmt(p); }
@@ -1825,6 +1851,129 @@ fn scan_semi(p: Parser&) -> bool {
     return false;
 }
 
+recursive fn match_arm(p: Parser&) -> i64 {
+    let at = cur(p);
+    let arm = node(p, Nk.Arm, Op.None, at);
+    var an .= p.nodes[arm];
+    if at.k == Tk.Ident && at.text == "_" {
+        p.pos++;
+        an.val |= 1;
+    } else {
+        var first = true;
+        while p.ok {
+            var neg = false;
+            if cur(p).k == Tk.Punct && cur(p).text == "-" {
+                neg = true;
+                p.pos++;
+            }
+            let pt = cur(p);
+            var lo = -1;
+            if pt.k == Tk.Int {
+                p.pos++;
+                lo = node(p, Nk.Int, Op.None, pt);
+                var ln .= p.nodes[lo];
+                ln.val = int_val(pt.text);
+            } else if pt.k == Tk.Char {
+                p.pos++;
+                lo = node(p, Nk.Int, Op.None, pt);
+                var ln .= p.nodes[lo];
+                ln.val = char_val(pt.text);
+            } else if pt.k == Tk.Ident {
+                p.pos++;
+                lo = node(p, Nk.Name, Op.None, pt);
+                var ln .= p.nodes[lo];
+                ln.at = pt.at;
+                let qt = cur(p);
+                if qt.k == Tk.Punct && qt.text == "::" && peek(p).k == Tk.Ident {
+                    p.pos += 2;
+                    let lt = p.toks[p.pos - 1];
+                    ln.text = p.src[pt.at..lt.at + lt.text.len];
+                }
+            } else {
+                return fail(p, Err.Name);
+            }
+            if neg {
+                if p.nodes[lo].k == Nk.Int {
+                    var lnn .= p.nodes[lo];
+                    lnn.val = -lnn.val;
+                } else {
+                    let ut = Tok { k: Tk.Punct, at: pt.at, line: pt.line, text: p.src[pt.at..pt.at] };
+                    let un = node(p, Nk.Un, Op.Neg, ut);
+                    link(p, un, lo);
+                    lo = un;
+                }
+            }
+            let nt = cur(p);
+            if nt.k == Tk.Punct && nt.text == ".." {
+                p.pos++;
+                let r = node(p, Nk.Range, Op.Range, nt);
+                link(p, r, lo);
+                let ht = cur(p);
+                if !(ht.k == Tk.Punct && (ht.text == "=>" || ht.text == ",")) {
+                    var neg2 = false;
+                    if cur(p).k == Tk.Punct && cur(p).text == "-" {
+                        neg2 = true;
+                        p.pos++;
+                    }
+                    let hi = primary(p, true);
+                    guard p.ok else { return -1; }
+                    if neg2 {
+                        if p.nodes[hi].k == Nk.Int {
+                            var hn .= p.nodes[hi];
+                            hn.val = -hn.val;
+                            link(p, r, hi);
+                        } else {
+                            let hn = p.nodes[hi];
+                            let ut = Tok { k: Tk.Punct, at: hn.at, line: hn.line, text: p.src[hn.at..hn.at] };
+                            let un = node(p, Nk.Un, Op.Neg, ut);
+                            link(p, un, hi);
+                            link(p, r, un);
+                        }
+                    } else {
+                        link(p, r, hi);
+                    }
+                }
+                link(p, arm, r);
+            } else {
+                link(p, arm, lo);
+                if lo >= 0 && p.nodes[lo].k == Nk.Name && first {
+                    let bt = cur(p);
+                    var hasbind = false;
+                    if bt.k == Tk.Punct && bt.text == "&" && peek(p).k == Tk.Ident {
+                        p.pos++;
+                        an.val |= 16;
+                        hasbind = true;
+                    }
+                    let b2 = cur(p);
+                    if (hasbind && b2.k == Tk.Ident)
+                        || (b2.k == Tk.Ident && peek(p).k == Tk.Punct
+                            && (peek(p).text == "=>" || peek(p).text == "{")) {
+                        let bn = node(p, Nk.Name, Op.None, b2);
+                        p.pos++;
+                        link(p, arm, bn);
+                        an.val |= 2;
+                    }
+                }
+            }
+            first = false;
+            if !eat_punct(p, ",") { break; }
+        }
+        guard p.ok else { return -1; }
+    }
+    guard want_punct(p, "=>", Err.Token) else { return -1; }
+    let b = cur(p);
+    if b.k == Tk.Punct && b.text == "{" {
+        let blk = block_stmt(p);
+        guard p.ok else { return -1; }
+        link(p, arm, blk);
+    } else {
+        let e = expr(p, 0, true);
+        guard p.ok else { return -1; }
+        link(p, arm, e);
+    }
+    return arm;
+}
+
 fn match_node(p: Parser&) -> i64 {
     let t = cur(p);
     p.pos++;
@@ -1837,116 +1986,188 @@ fn match_node(p: Parser&) -> i64 {
         let c = cur(p);
         if c.k == Tk.Eof { return fail(p, Err.Brace); }
         if c.k == Tk.Punct && c.text == "}" { p.pos++; return n; }
-        let at = cur(p);
-        let arm = node(p, Nk.Arm, Op.None, at);
-        var an .= p.nodes[arm];
-        if c.k == Tk.Ident && c.text == "_" {
-            p.pos++;
-            an.val |= 1;
-        } else {
-            var first = true;
-            while p.ok {
-                var neg = false;
-                if cur(p).k == Tk.Punct && cur(p).text == "-" {
-                    neg = true;
-                    p.pos++;
-                }
-                let pt = cur(p);
-                var lo = -1;
-                if pt.k == Tk.Int {
-                    p.pos++;
-                    lo = node(p, Nk.Int, Op.None, pt);
-                    var ln .= p.nodes[lo];
-                    ln.val = int_val(pt.text);
-                } else if pt.k == Tk.Char {
-                    p.pos++;
-                    lo = node(p, Nk.Int, Op.None, pt);
-                    var ln .= p.nodes[lo];
-                    ln.val = char_val(pt.text);
-                } else if pt.k == Tk.Ident {
-                    p.pos++;
-                    lo = node(p, Nk.Name, Op.None, pt);
-                    var ln .= p.nodes[lo];
-                    ln.at = pt.at;
-                    let qt = cur(p);
-                    if qt.k == Tk.Punct && qt.text == "::" && peek(p).k == Tk.Ident {
-                        p.pos += 2;
-                        let lt = p.toks[p.pos - 1];
-                        ln.text = p.src[pt.at..lt.at + lt.text.len];
-                    }
-                } else {
-                    return fail(p, Err.Name);
-                }
-                if neg {
-                    let ut = Tok { k: Tk.Punct, at: pt.at, line: pt.line, text: p.src[pt.at..pt.at] };
-                    let un = node(p, Nk.Un, Op.Neg, ut);
-                    link(p, un, lo);
-                    lo = un;
-                }
-                let nt = cur(p);
-                if nt.k == Tk.Punct && nt.text == ".." {
-                    p.pos++;
-                    let r = node(p, Nk.Range, Op.Range, nt);
-                    link(p, r, lo);
-                    let ht = cur(p);
-                    if !(ht.k == Tk.Punct && (ht.text == "=>" || ht.text == ",")) {
-                        var neg2 = false;
-                        if cur(p).k == Tk.Punct && cur(p).text == "-" {
-                            neg2 = true;
-                            p.pos++;
-                        }
-                        let hi = primary(p, true);
-                        guard p.ok else { return -1; }
-                        if neg2 {
-                            let hn = p.nodes[hi];
-                            let ut = Tok { k: Tk.Punct, at: hn.at, line: hn.line, text: p.src[hn.at..hn.at] };
-                            let un = node(p, Nk.Un, Op.Neg, ut);
-                            link(p, un, hi);
-                            link(p, r, un);
-                        } else {
-                            link(p, r, hi);
-                        }
-                    }
-                    link(p, arm, r);
-                } else {
-                    link(p, arm, lo);
-                    if lo >= 0 && p.nodes[lo].k == Nk.Name && first {
-                        let bt = cur(p);
-                        var hasbind = false;
-                        if bt.k == Tk.Punct && bt.text == "&" && peek(p).k == Tk.Ident {
-                            p.pos++;
-                            an.val |= 16;
-                            hasbind = true;
-                        }
-                        let b2 = cur(p);
-                        if (hasbind && b2.k == Tk.Ident)
-                            || (b2.k == Tk.Ident && peek(p).k == Tk.Punct
-                                && (peek(p).text == "=>" || peek(p).text == "{")) {
-                            let bn = node(p, Nk.Name, Op.None, b2);
-                            p.pos++;
-                            link(p, arm, bn);
-                            an.val |= 2;
-                        }
-                    }
-                }
-                first = false;
-                if !eat_punct(p, ",") { break; }
+        if c.k == Tk.Kw && c.text == "const" {
+            let nt = peek(p);
+            if nt.k == Tk.Kw && (nt.text == "for" || nt.text == "if") {
+                let frag = if nt.text == "for" { const_for(p, 1) } else { const_if(p, 1) };
+                guard p.ok else { return -1; }
+                let at = Tok { k: Tk.Punct, at: c.at, line: c.line, text: p.src[c.at..c.at] };
+                let arm = node(p, Nk.Arm, Op.None, at);
+                var an .= p.nodes[arm];
+                an.val |= 1;
+                link(p, n, arm);
+                eat_punct(p, ",");
+                continue;
             }
-            guard p.ok else { return -1; }
         }
-        guard want_punct(p, "=>", Err.Token) else { return -1; }
-        let b = cur(p);
-        if b.k == Tk.Punct && b.text == "{" {
-            let blk = block_stmt(p);
-            guard p.ok else { return -1; }
-            link(p, arm, blk);
-        } else {
-            let e = expr(p, 0, true);
-            guard p.ok else { return -1; }
-            link(p, arm, e);
-        }
+        let arm = match_arm(p);
+        guard p.ok else { return -1; }
         link(p, n, arm);
         eat_punct(p, ",");
+    }
+    return -1;
+}
+
+fn const_source(p: Parser&, arity: i64&) -> bool {
+    let t = cur(p);
+    if t.k == Tk.Punct && t.text == "[" {
+        p.pos++;
+        while p.ok {
+            if eat_punct(p, "]") { arity = 1; return true; }
+            let e = expr(p, 0, true);
+            guard p.ok else { return false; }
+            if eat_punct(p, ",") { continue; }
+            guard want_punct(p, "]", Err.Bracket) else { return false; }
+            arity = 1;
+            return true;
+        }
+        return false;
+    }
+    if t.k == Tk.Ident {
+        p.pos++;
+        guard t.text == "fields" || t.text == "variants" || t.text == "types" else {
+            return failb(p, Err.Type);
+        }
+        guard want_punct(p, "<", Err.Type) else { return false; }
+        var depth: i64 = 1;
+        while p.ok {
+            let q = cur(p);
+            if q.k == Tk.Eof { return failb(p, Err.Type); }
+            if q.k == Tk.Punct {
+                if q.text == "<" { depth++; }
+                else if q.text == ">" {
+                    depth--;
+                    if depth == 0 {
+                        p.pos++;
+                        arity = if t.text == "types" { 1 } else { 2 };
+                        return true;
+                    }
+                }
+                else if q.text == ">>" {
+                    depth -= 2;
+                    if depth != 0 { return failb(p, Err.Type); }
+                    p.pos++;
+                    arity = if t.text == "types" { 1 } else { 2 };
+                    return true;
+                }
+            }
+            p.pos++;
+        }
+        return failb(p, Err.Type);
+    }
+    return failb(p, Err.Type);
+}
+
+fn const_cond(p: Parser&) -> bool {
+    var depth: i64 = 0;
+    while true {
+        let t = cur(p);
+        if t.k == Tk.Eof { return failb(p, Err.Expr); }
+        if t.k == Tk.Punct {
+            if t.text == "(" || t.text == "[" { depth++; }
+            else if t.text == ")" || t.text == "]" {
+                guard depth > 0 else { return failb(p, Err.Expr); }
+                depth--;
+            }
+            else if t.text == "{" {
+                guard depth == 0 else { return failb(p, Err.Expr); }
+                return true;
+            }
+        }
+        p.pos++;
+    }
+    return false;
+}
+
+fn const_body_block(p: Parser&) -> bool {
+    guard want_punct(p, "{", Err.Block) else { return false; }
+    let dummy = node(p, Nk.Block, Op.None, cur(p));
+    collect(p, dummy);
+    guard p.ok else { return false; }
+    return want_punct(p, "}", Err.Brace);
+}
+
+fn const_body_arms(p: Parser&) -> bool {
+    guard want_punct(p, "{", Err.Brace) else { return false; }
+    while p.ok {
+        let c = cur(p);
+        if c.k == Tk.Eof { return failb(p, Err.Brace); }
+        if c.k == Tk.Punct && c.text == "}" { p.pos++; return true; }
+        let arm = match_arm(p);
+        guard p.ok else { return false; }
+        eat_punct(p, ",");
+    }
+    return false;
+}
+
+fn const_body_inits(p: Parser&) -> bool {
+    guard want_punct(p, "{", Err.Brace) else { return false; }
+    if eat_punct(p, "}") { return true; }
+    while p.ok {
+        let ft = cur(p);
+        let nt = peek(p);
+        if ft.k == Tk.Ident && nt.k == Tk.Punct && nt.text == ":" { p.pos += 2; }
+        let v = expr(p, 0, true);
+        guard p.ok else { return false; }
+        if eat_punct(p, ",") {
+            if eat_punct(p, "}") { return true; }
+            continue;
+        }
+        break;
+    }
+    return want_punct(p, "}", Err.Brace);
+}
+
+fn const_body(p: Parser&, mode: i64) -> bool {
+    if mode == 0 { return const_body_block(p); }
+    if mode == 1 { return const_body_arms(p); }
+    return const_body_inits(p);
+}
+
+recursive fn const_for(p: Parser&, mode: i64) -> i64 {
+    let t = cur(p);
+    p.pos += 2;
+    let n = node(p, Nk.ConstFor, Op.None, t);
+    guard want_punct(p, "<", Err.Type) else { return -1; }
+    var names: i64 = 0;
+    while p.ok {
+        let nt = cur(p);
+        guard nt.k == Tk.Ident else { return fail(p, Err.Name); }
+        p.pos++;
+        names++;
+        if !eat_punct(p, ",") { break; }
+    }
+    guard p.ok else { return -1; }
+    guard want_punct(p, ">", Err.Type) else { return -1; }
+    guard eat_kw(p, "in") else { return fail(p, Err.Type); }
+    var arity: i64 = 0;
+    guard const_source(p, arity) else { return -1; }
+    guard p.ok else { return -1; }
+    guard names == arity else { return fail(p, Err.Name); }
+    guard const_body(p, mode) else { return -1; }
+    guard p.ok else { return -1; }
+    return n;
+}
+
+recursive fn const_if(p: Parser&, mode: i64) -> i64 {
+    let t = cur(p);
+    p.pos += 2;
+    let n = node(p, Nk.ConstIf, Op.None, t);
+    while p.ok {
+        guard const_cond(p) else { return -1; }
+        guard const_body(p, mode) else { return -1; }
+        guard p.ok else { return -1; }
+        if !eat_kw(p, "else") { return n; }
+        let nt = cur(p);
+        if nt.k == Tk.Kw && nt.text == "const" {
+            let pt = peek(p);
+            guard pt.k == Tk.Kw && pt.text == "if" else { return fail(p, Err.Stmt); }
+            p.pos += 2;
+            continue;
+        }
+        guard const_body(p, mode) else { return -1; }
+        guard p.ok else { return -1; }
+        return n;
     }
     return -1;
 }
@@ -2126,10 +2347,11 @@ fn dump_head(p: Parser&, n: Node, out: u8[>..]&) {
         return;
     }
     if n.k == Nk.Name || n.k == Nk.Fn || n.k == Nk.Field
-        || n.k == Nk.Param || n.k == Nk.Fld || n.k == Nk.Struct
+        || n.k == Nk.Param || n.k == Nk.Struct
         || n.k == Nk.Enum || n.k == Nk.Alias {
         format(out, " ", n.text);
     }
+    if n.k == Nk.Fld && n.text.len > 0 { format(out, " ", n.text); }
     if n.k == Nk.Int { format(out, " ", n.val); }
     if n.k == Nk.Float { format(out, " ", n.fval); }
     if n.k == Nk.Bin || n.k == Nk.Un || n.k == Nk.Range {
@@ -2196,6 +2418,13 @@ recursive fn dump(p: Parser&, id: i64, depth: i64, out: u8[>..]&) {
     guard id >= 0 else { return; }
     var n .= p.nodes[id];
     for i in depth { out.push(' '); out.push(' '); }
+    if n.k == Nk.ConstFor || n.k == Nk.ConstIf {
+        let where = if n.val & 1 != 0 { "expr" } else { "stmt" };
+        let num = if n.k == Nk.ConstFor { 24 } else { 25 };
+        format(out, "!! unsupported-", where, " ", num);
+        out.push('\n');
+        return;
+    }
     format(out, kind_name(n.k));
     dump_head(p, n, out);
     out.push('\n');
